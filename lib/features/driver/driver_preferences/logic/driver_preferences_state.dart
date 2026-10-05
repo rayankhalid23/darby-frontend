@@ -25,11 +25,11 @@ class DriverPreferencesLoading extends DriverPreferencesState {}
 
 class DriverPreferencesLoaded extends DriverPreferencesState {
   final DriverPreferencesModel? preferences;
-  final PreferenceDefaultsModel defaults;
+  final PreferenceDefaultsModel? defaults;
 
   const DriverPreferencesLoaded({
     this.preferences,
-    required this.defaults,
+    this.defaults,
   });
 }
 

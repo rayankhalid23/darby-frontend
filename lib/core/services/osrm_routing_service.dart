@@ -8,10 +8,15 @@ class RouteResult {
   final double distanceMeters;
   final double durationSeconds;
 
+  /// true فقط لو النقاط مسار شوارع فعلي من OSRM؛ false = نقاط المحطات
+  /// موصولة مباشرة (فشل/بدون إنترنت) ولا يجب رسمها كمسار
+  final bool isRoad;
+
   RouteResult({
     required this.points,
     required this.distanceMeters,
     required this.durationSeconds,
+    this.isRoad = false,
   });
 
   double get distanceKm => distanceMeters / 1000.0;
@@ -71,7 +76,7 @@ class OsrmRoutingService {
           'https://router.project-osrm.org/route/v1/driving/$coordsParam?overview=full&geometries=geojson';
 
       final response =
-          await _dio.get(url).timeout(const Duration(seconds: 4));
+          await _dio.get(url).timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200 && response.data is Map) {
         final data = response.data as Map;
@@ -98,6 +103,7 @@ class OsrmRoutingService {
                 points: path,
                 distanceMeters: distance,
                 durationSeconds: duration,
+                isRoad: true,
               );
               _routeCache[key] = result;
               return result;
@@ -111,13 +117,12 @@ class OsrmRoutingService {
       _pendingRequests.remove(key);
     }
 
-    // Fallback if offline/failed: connect points directly
-    final fallback = RouteResult(
+    // Fallback if offline/failed: connect points directly — بدون تخزين بالكاش
+    // حتى المحاولة الجاية تجيب مسار الشوارع بدل ما يثبت الخط المستقيم
+    return RouteResult(
       points: validWaypoints,
       distanceMeters: 0,
       durationSeconds: 0,
     );
-    _routeCache[key] = fallback;
-    return fallback;
   }
 }

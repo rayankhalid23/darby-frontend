@@ -59,21 +59,15 @@ class NotificationNavigationHandler {
     if (isParent) {
       switch (screen) {
         case 'TRIP_DETAILS':
-          if (entityId != null) {
-            state.pushNamed(
-              AppRoutes.parentTripDetails,
-              arguments: {'tripId': entityId},
-            );
-          }
-          break;
         case 'TRIP_TRACKING':
           if (entityId != null) {
             state.pushNamed(
-              AppRoutes.parentTripTracking,
-              arguments: {'tripId': entityId},
+              AppRoutes.parentTripDetails,
+              arguments: entityId,
             );
           }
           break;
+
         case 'INVOICE_DETAILS':
           if (entityId != null) {
             state.pushNamed(AppRoutes.parentInvoiceDetails, arguments: entityId);
@@ -109,6 +103,15 @@ class NotificationNavigationHandler {
         case 'SUBSCRIPTION_DETAILS':
           if (entityId != null) {
             state.pushNamed(AppRoutes.driverSubscriptionDetails, arguments: entityId);
+          }
+          break;
+        // نداء إنقاذ لسائق بديل: entity_id هو رقم المهمة (dispatch_id)
+        case 'EMERGENCY_DISPATCH':
+          final dispatchId = int.tryParse(data['dispatch_id']?.toString() ?? '') ?? entityId;
+          if (dispatchId != null) {
+            state.pushNamed(AppRoutes.driverEmergencyDispatchDetails, arguments: dispatchId);
+          } else {
+            state.pushNamed(AppRoutes.driverEmergencyDispatches);
           }
           break;
         default:

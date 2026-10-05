@@ -368,7 +368,7 @@ class _RequestDetailsScreenState extends State<RequestDetailsScreen> {
                     child: CachedNetworkImage(
                       imageUrl: driver.photoUrl!,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Center(
+                      errorWidget: (_, _, _) => Center(
                         child: Text(initials,
                             style: AppTextStyles.style(
                                 fontSize: 18.sp,
@@ -570,7 +570,7 @@ class _RequestDetailsScreenState extends State<RequestDetailsScreen> {
                           child: CachedNetworkImage(
                             imageUrl: child.photoUrl!,
                             fit: BoxFit.cover,
-                            errorWidget: (_, __, ___) => Center(
+                            errorWidget: (_, _, _) => Center(
                               child: Text(child.avatarInitials,
                                   style: AppTextStyles.style(
                                       fontSize: 13.sp,
@@ -594,6 +594,8 @@ class _RequestDetailsScreenState extends State<RequestDetailsScreen> {
                     children: [
                       Text(
                         child.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.style(
                           fontSize: 14.sp,
                           fontWeight: FontWeight.bold,
@@ -604,6 +606,8 @@ class _RequestDetailsScreenState extends State<RequestDetailsScreen> {
                       if (child.gradeLabelDisplay.isNotEmpty)
                         Text(
                           child.gradeLabelDisplay,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: AppTextStyles.style(
                             fontSize: 12.sp,
                             color: isDark

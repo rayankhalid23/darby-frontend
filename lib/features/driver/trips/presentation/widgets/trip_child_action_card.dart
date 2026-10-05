@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:kids_transport/core/widgets/app_user_avatar.dart';
 import 'package:kids_transport/core/theme/app_colors.dart';
 import 'package:kids_transport/core/theme/app_theme.dart';
 import 'package:kids_transport/core/theme/text_styles.dart';
@@ -96,7 +97,8 @@ class TripChildActionCard extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(15),
                   child: CachedNetworkImage(
-                    imageUrl: item.photo!,
+                    imageUrl: AppUserAvatar.resolveUrl(item.photo)!,
+                    httpHeaders: AppUserAvatar.imageHeaders,
                     width: 30,
                     height: 30,
                     fit: BoxFit.cover,

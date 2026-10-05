@@ -40,6 +40,7 @@ class _ParentSearchScreenState extends State<ParentSearchScreen> {
   String _searchQuery = '';
   String _driverGender = 'both'; // للفلتر بعد النتائج
   bool _hasAcOnly = false; // للفلتر بعد النتائج
+  bool _isSubscriptionSearch = false; // تمييز نتائج البحث المبني على بيانات الاشتراك
   final List<int> _selectedKidsIds = [];
   String _subscriptionType = 'multi_day';
   String _tripDirection = 'go';
@@ -158,6 +159,7 @@ class _ParentSearchScreenState extends State<ParentSearchScreen> {
                   final endStr = endDate?.toIso8601String().split('T').first;
 
                   setState(() {
+                    _isSubscriptionSearch = true;
                     _selectedKidsIds.clear();
                     _selectedKidsIds.addAll(selectedKidsIds);
                     _tripDirection = tripDirection;
@@ -593,6 +595,7 @@ class _ParentSearchScreenState extends State<ParentSearchScreen> {
                                 },
                                 onSubmitted: (val) {
                                   FocusScope.of(context).unfocus();
+                                  setState(() => _isSubscriptionSearch = false);
                                   context.read<SearchCubit>().searchDrivers(
                                     searchQuery: _searchQuery,
                                   );
@@ -654,6 +657,7 @@ class _ParentSearchScreenState extends State<ParentSearchScreen> {
                                         tooltip: 'بحث',
                                         onPressed: () {
                                           FocusScope.of(context).unfocus();
+                                          setState(() => _isSubscriptionSearch = false);
                                           context
                                               .read<SearchCubit>()
                                               .searchDrivers(
@@ -968,6 +972,9 @@ class _ParentSearchScreenState extends State<ParentSearchScreen> {
                                       driver: driver,
                                       isSelected: false,
                                       showPricing: hasPricing,
+                                      isSubscriptionSearch:
+                                          _isSubscriptionSearch && _selectedKidsIds.isNotEmpty,
+                                      isTopRecommended: index == 0,
                                       onTap: () => _onTapViewProfile(
                                         driver,
                                         showPricing: hasPricing,

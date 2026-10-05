@@ -170,8 +170,16 @@ class LocationChangeCubit extends Cubit<LocationChangeState> {
     } catch (e) {
       emit(currentState.copyWith(
         isAvailableTripsLoading: false,
-        error: e.toString(),
+        availableTrips: [],
+        clearError: true,
       ));
+    }
+  }
+
+  void clearError() {
+    final currentState = state;
+    if (currentState is LocationChangeOptionsLoaded) {
+      emit(currentState.copyWith(clearError: true));
     }
   }
 
@@ -255,17 +263,26 @@ class LocationChangeCubit extends Cubit<LocationChangeState> {
         orElse: () => ChildAvailableTripsModel(childId: childId, childName: '', availableTrips: []),
       );
 
-      if (childTrips.availableTrips.isNotEmpty) {
-        for (final trip in childTrips.availableTrips) {
-          selections.add({
-            'child_id': childId,
-            'trip_id': trip.tripId,
-            if (trip.shiftSlot != null) 'shift_slot': trip.shiftSlot,
-          });
+      final matchingTrips = childTrips.availableTrips.where((trip) {
+        if (currentState.pointType == 'pickup') return trip.direction == 'to_school';
+        if (currentState.pointType == 'dropoff') return trip.direction == 'to_home';
+        return false;
+      }).toList();
+
+      final tripIds = <int>[];
+      if (matchingTrips.isNotEmpty) {
+        final activeSubId = matchingTrips.first.activeSubscriptionId;
+        if (activeSubId > 0) {
+          tripIds.add(activeSubId);
+        } else if (matchingTrips.first.tripId > 0) {
+          tripIds.add(matchingTrips.first.tripId);
         }
-      } else {
-        selections.add({'child_id': childId});
       }
+
+      selections.add({
+        'child_id': childId,
+        'trip_ids': tripIds,
+      });
     }
 
     return selections;
@@ -286,10 +303,26 @@ class LocationChangeCubit extends Cubit<LocationChangeState> {
       return;
     }
 
+    if (currentState.isAvailableTripsLoading) {
+      emit(currentState.copyWith(error: 'جاري تحميل رحلات الأطفال، يرجى الانتظار'));
+      return;
+    }
+
+    final selections = _buildSelectionsPayload(currentState);
+    if (selections.isEmpty) {
+      emit(currentState.copyWith(error: 'لا توجد رحلات للأطفال المختارين في هذا التاريخ'));
+      return;
+    }
+
+    final isValid = selections.every((item) => item['trip_ids'] != null && (item['trip_ids'] as List).isNotEmpty);
+    if (!isValid) {
+      emit(currentState.copyWith(error: 'لا توجد رحلات مطابقة للوجهة المحددة للأطفال المختارين في هذا التاريخ'));
+      return;
+    }
+
     emit(currentState.copyWith(isPreviewLoading: true, clearError: true));
 
     final dateStr = _formatDate(currentState.changeDate);
-    final selections = _buildSelectionsPayload(currentState);
 
     final (preview, error) = await _repository.previewRequest(
       pointType: currentState.pointType,
@@ -323,10 +356,26 @@ class LocationChangeCubit extends Cubit<LocationChangeState> {
       return;
     }
 
+    if (currentState.isAvailableTripsLoading) {
+      emit(currentState.copyWith(error: 'جاري تحميل رحلات الأطفال، يرجى الانتظار'));
+      return;
+    }
+
+    final selections = _buildSelectionsPayload(currentState);
+    if (selections.isEmpty) {
+      emit(currentState.copyWith(error: 'لا توجد رحلات للأطفال المختارين في هذا التاريخ'));
+      return;
+    }
+
+    final isValid = selections.every((item) => item['trip_ids'] != null && (item['trip_ids'] as List).isNotEmpty);
+    if (!isValid) {
+      emit(currentState.copyWith(error: 'لا توجد رحلات مطابقة للوجهة المحددة للأطفال المختارين في هذا التاريخ'));
+      return;
+    }
+
     emit(currentState.copyWith(isSubmitting: true, clearError: true));
 
     final dateStr = _formatDate(currentState.changeDate);
-    final selections = _buildSelectionsPayload(currentState);
 
     final (createdRequests, error) = await _repository.createRequest(
       pointType: currentState.pointType,

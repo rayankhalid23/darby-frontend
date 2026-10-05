@@ -67,7 +67,7 @@ class ParentProfileRemoteDataSource {
     final fields = <String, dynamic>{
       'full_name': fullName,
       'phone_number': phoneNumber,
-      if (email != null) 'email': email,
+      'email': ?email,
       'alternative_phone':
           alternativePhone, // ترسل null لحذفه كما طلبت الباك إند
     };
@@ -80,7 +80,7 @@ class ParentProfileRemoteDataSource {
       );
       requestBody = FormData.fromMap({
         ...fields,
-        if (multipart != null) 'avatar': multipart,
+        'avatar': ?multipart,
       });
     } else {
       requestBody = fields;

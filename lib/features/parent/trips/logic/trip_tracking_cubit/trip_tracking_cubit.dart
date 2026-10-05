@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../data/repositories/trips_repository.dart';
 import '../../data/models/active_trip_model.dart';
@@ -88,6 +89,7 @@ class TripTrackingCubit extends Cubit<TripTrackingState> {
         );
       },
       onError: (error) {
+        debugPrint('❌ [Firestore] تعذر قراءة موقع السائق trips_tracking/$parsedTripId: $error');
         if (state is TripTrackingSingleLoaded) {
           final current = state as TripTrackingSingleLoaded;
           emit(
@@ -124,7 +126,8 @@ class TripTrackingCubit extends Cubit<TripTrackingState> {
   }
 
   void _listenMultiTrack() {
-    _multiTrackSubscription = _repository.trackMultipleTripsLive().listen(
+    final tripIds = _allActiveTrips.map((t) => t.tripId).toList();
+    _multiTrackSubscription = _repository.trackMultipleTripsLive(tripIds).listen(
       (tracks) {
         emit(
           TripTrackingMultiLoaded(
@@ -135,6 +138,7 @@ class TripTrackingCubit extends Cubit<TripTrackingState> {
         );
       },
       onError: (error) {
+        debugPrint('❌ [Firestore] تعذر قراءة مواقع السائقين من trips_tracking: $error');
         if (state is! TripTrackingMultiLoaded) {
           emit(TripTrackingError('خطأ في تتبع الرحلات المتعددة: $error'));
         }

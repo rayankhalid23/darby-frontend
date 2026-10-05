@@ -77,6 +77,7 @@ class _FullTrackingMapScreenState extends State<FullTrackingMapScreen> {
                       singleTrip: _currentTrip,
                       multiTracks: state is TripTrackingMultiLoaded ? state.tracks : [],
                       multiTrips: widget.allTrips,
+                      locationErrorMessage: TrackingMapWidget.locationErrorFrom(state),
                     );
                   },
                 ),

@@ -69,29 +69,36 @@ class ComplaintCard extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 14.r,
-                          backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
-                          backgroundImage: (complaint.driverAvatar != null && complaint.driverAvatar!.isNotEmpty)
-                              ? NetworkImage(complaint.driverAvatar!)
-                              : null,
-                          child: (complaint.driverAvatar == null || complaint.driverAvatar!.isEmpty)
-                              ? Icon(Icons.person_rounded, size: 14.r, color: theme.colorScheme.primary)
-                              : null,
-                        ),
-                        SizedBox(width: 8.w),
-                        Text(
-                          complaint.driverName ?? 'الكابتن',
-                          style: AppTextStyles.style(
-                            fontSize: 13.sp,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? AppColors.white : AppColors.textDark,
+                    Expanded(
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 14.r,
+                            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
+                            backgroundImage: (complaint.driverAvatar != null && complaint.driverAvatar!.isNotEmpty)
+                                ? NetworkImage(complaint.driverAvatar!)
+                                : null,
+                            child: (complaint.driverAvatar == null || complaint.driverAvatar!.isEmpty)
+                                ? Icon(Icons.person_rounded, size: 14.r, color: theme.colorScheme.primary)
+                                : null,
                           ),
-                        ),
-                      ],
+                          SizedBox(width: 8.w),
+                          Expanded(
+                            child: Text(
+                              complaint.driverName ?? 'الكابتن',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.style(
+                                fontSize: 13.sp,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? AppColors.white : AppColors.textDark,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    SizedBox(width: 8.w),
                     ComplaintStatusBadge(status: complaint.status),
                   ],
                 ),
@@ -100,17 +107,21 @@ class ComplaintCard extends StatelessWidget {
                   children: [
                     Icon(Icons.directions_bus_outlined, size: 14.r, color: isDark ? AppColors.grey400 : AppColors.textMuted),
                     SizedBox(width: 6.w),
-                    Text(
-                      complaint.tripTitle ??
-                          ((complaint.tripId != null && complaint.tripId! > 0)
-                              ? 'رحلة #${complaint.tripId}'
-                              : 'شكوى عامة (ليست مرتبطة برحلة)'),
-                      style: AppTextStyles.style(
-                        fontSize: 11.5.sp,
-                        color: isDark ? AppColors.grey300 : AppColors.grey700,
+                    Expanded(
+                      child: Text(
+                        complaint.tripTitle ??
+                            ((complaint.tripId != null && complaint.tripId! > 0)
+                                ? 'رحلة #${complaint.tripId}'
+                                : 'شكوى عامة (ليست مرتبطة برحلة)'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.style(
+                          fontSize: 11.5.sp,
+                          color: isDark ? AppColors.grey300 : AppColors.grey700,
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    SizedBox(width: 8.w),
                     Icon(Icons.calendar_today_outlined, size: 12.r, color: isDark ? AppColors.grey400 : AppColors.textMuted),
                     SizedBox(width: 4.w),
                     Text(

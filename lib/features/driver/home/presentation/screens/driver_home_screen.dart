@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:kids_transport/core/di/dependency_injection.dart';
+import 'package:kids_transport/core/network/api_exception.dart';
 import 'package:kids_transport/core/routes/app_router.dart';
+import 'package:kids_transport/core/services/battery_service.dart';
 import 'package:kids_transport/core/theme/app_colors.dart';
 import 'package:kids_transport/core/theme/text_styles.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
@@ -12,6 +16,9 @@ import 'package:kids_transport/features/driver/home/presentation/widgets/welcome
 import 'package:kids_transport/features/driver/home/presentation/widgets/active_trip_card.dart';
 import 'package:kids_transport/features/driver/home/presentation/widgets/driver_services_widget.dart';
 import 'package:kids_transport/features/driver/trips/presentation/widgets/trip_card.dart';
+import 'package:kids_transport/features/driver/trips/presentation/widgets/low_battery_dialog.dart';
+import 'package:kids_transport/features/driver/trips/data/models/driver_trip_model.dart';
+import 'package:kids_transport/features/driver/trips/data/repositories/driver_trips_repository.dart';
 import 'package:kids_transport/features/driver/requests/presentation/widgets/new_requests_section.dart';
 
 import 'package:kids_transport/features/driver/home/logic/driver_home_cubit/driver_home_cubit.dart';
@@ -138,25 +145,7 @@ class _HomeBody extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           if (state.todayTrips.isNotEmpty)
-            TripCard(
-              trip: state.todayTrips.first,
-              isStarting: false,
-              onDetails: () => Navigator.pushNamed(
-                context,
-                AppRoutes.driverTripDetails,
-                arguments: state.todayTrips.first.tripId,
-              ),
-              onStart: () => Navigator.pushNamed(
-                context,
-                AppRoutes.driverLiveTrip,
-                arguments: state.todayTrips.first.tripId,
-              ),
-              onLive: () => Navigator.pushNamed(
-                context,
-                AppRoutes.driverLiveTrip,
-                arguments: state.todayTrips.first.tripId,
-              ),
-            )
+            _TodayTripCard(trip: state.todayTrips.first)
           else if (state.hasActiveTrip && state.activeTripId != null)
             InkWell(
               onTap: () => Navigator.pushNamed(
@@ -171,16 +160,109 @@ class _HomeBody extends StatelessWidget {
             ActiveTripCard(hasActiveTrip: state.hasActiveTrip),
           const SizedBox(height: 24),
 
-          // 5) قسم طلبات الاشتراك الجديدة — عرض أول طلب مع زر عرض الكل
           NewRequestsSection(
             requests: state.newRequests,
             onViewAll: () => Navigator.pushNamed(
               context,
-              AppRoutes.driverLocationChangeRequests,
+              AppRoutes.driverRequests,
             ),
           ),
           const SizedBox(height: 20),
         ],
+      ),
+    );
+  }
+}
+
+
+/// كرت أول رحلة اليوم بالرئيسية — زر "بدء الرحلة" يبعت طلب البدء للـ Backend
+/// (نفس منطق شاشة رحلاتي) قبل فتح الرحلة الحية، بدل فتحها والرحلة لسه scheduled
+class _TodayTripCard extends StatefulWidget {
+  final DriverTripModel trip;
+
+  const _TodayTripCard({required this.trip});
+
+  @override
+  State<_TodayTripCard> createState() => _TodayTripCardState();
+}
+
+class _TodayTripCardState extends State<_TodayTripCard> {
+  bool _isStarting = false;
+
+  Future<void> _startTrip() async {
+    if (_isStarting) return;
+    setState(() => _isStarting = true);
+    try {
+      final batteryService = getIt<BatteryService>();
+      final batteryLevel = await batteryService.getBatteryLevel();
+
+      if (batteryLevel != null && batteryLevel < 50) {
+        if (!mounted) return;
+        final proceed = await LowBatteryDialog.show(context, batteryLevel: batteryLevel);
+        if (proceed != true) {
+          if (mounted) setState(() => _isStarting = false);
+          return;
+        }
+      }
+
+      final position = await _capturePosition();
+      if (!mounted) return;
+      final result = await driverSl<DriverTripsRepository>().startTrip(
+        widget.trip.tripId,
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+      );
+      if (!mounted) return;
+      await Navigator.pushNamed(
+        context,
+        AppRoutes.driverLiveTrip,
+        arguments: result.tripId,
+      );
+      if (mounted) context.read<DriverHomeCubit>().loadDriverHomeData();
+    } catch (e) {
+      if (!mounted) return;
+      final message = e is ApiException ? e.message : 'فشل بدء الرحلة: ${e.toString()}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.error),
+      );
+    } finally {
+      if (mounted) setState(() => _isStarting = false);
+    }
+  }
+
+  Future<Position?> _capturePosition() async {
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TripCard(
+      trip: widget.trip,
+      isStarting: _isStarting,
+      onDetails: () => Navigator.pushNamed(
+        context,
+        AppRoutes.driverTripDetails,
+        arguments: widget.trip.tripId,
+      ),
+      onStart: _startTrip,
+      onLive: () => Navigator.pushNamed(
+        context,
+        AppRoutes.driverLiveTrip,
+        arguments: widget.trip.tripId,
       ),
     );
   }

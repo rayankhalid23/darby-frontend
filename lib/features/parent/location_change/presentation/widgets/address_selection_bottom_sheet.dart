@@ -109,7 +109,7 @@ class AddressSelectionBottomSheet extends StatelessWidget {
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: addresses.length,
-                  separatorBuilder: (_, __) => SizedBox(height: 10.h),
+                  separatorBuilder: (_, _) => SizedBox(height: 10.h),
                   itemBuilder: (context, index) {
                     final item = addresses[index];
                     final isSelected = selectedAddress?.id == item.id;

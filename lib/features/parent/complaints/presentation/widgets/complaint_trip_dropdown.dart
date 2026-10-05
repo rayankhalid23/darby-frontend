@@ -104,6 +104,8 @@ class ComplaintTripDropdown extends StatelessWidget {
                 value: trip.id,
                 child: Text(
                   'رحلة #${trip.id} - $timingAr (التاريخ: $dateStr) [الحالة: $statusAr]',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.style(
                     fontSize: 12.sp,
                     color: isDark ? AppColors.white : AppColors.textDark,

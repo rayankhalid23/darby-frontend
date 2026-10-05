@@ -29,8 +29,8 @@ class TripsRepository {
   }
 
   /// Stream live tracking for multiple active trips via Remote DataSource (Firestore)
-  Stream<List<LiveTrackingModel>> trackMultipleTripsLive() {
-    return _remoteDataSource.trackMultipleTripsLiveStream();
+  Stream<List<LiveTrackingModel>> trackMultipleTripsLive(List<int> tripIds) {
+    return _remoteDataSource.trackMultipleTripsLiveStream(tripIds);
   }
 
   Future<List<LiveTrackingModel>> getMultipleActiveTracking() async {

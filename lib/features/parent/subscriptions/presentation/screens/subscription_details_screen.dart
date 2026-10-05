@@ -265,7 +265,7 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
                     child: CachedNetworkImage(
                       imageUrl: driver.avatarUrl!,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => _driverInitials(
+                      errorWidget: (_, _, _) => _driverInitials(
                           driver.name, driverColor),
                     ),
                   )
@@ -463,7 +463,7 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
                               child: CachedNetworkImage(
                                 imageUrl: child.photoUrl!,
                                 fit: BoxFit.cover,
-                                errorWidget: (_, __, ___) =>
+                                errorWidget: (_, _, _) =>
                                     Center(
                                   child: Text(child.avatarInitials,
                                       style: AppTextStyles.style(

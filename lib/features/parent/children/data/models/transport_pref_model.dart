@@ -72,21 +72,26 @@ class TransportPrefModel {
   }
 
   String get serviceTypeDisplay {
-    if (serviceType == 'both' || serviceType == 'round_trip')
+    if (serviceType == 'both' || serviceType == 'round_trip') {
       return 'الذهاب والعودة';
-    if (serviceType == 'go' || serviceType == 'one_way_to_school')
+    }
+    if (serviceType == 'go' || serviceType == 'one_way_to_school') {
       return 'الذهاب فقط';
-    if (serviceType == 'return' || serviceType == 'one_way_from_school')
+    }
+    if (serviceType == 'return' || serviceType == 'one_way_from_school') {
       return 'العودة فقط';
+    }
     return serviceType;
   }
 
   String get periodDisplay {
     final p = period.toLowerCase();
-    if (p == 'morning' || p == 'morning_only' || p.contains('صباح'))
+    if (p == 'morning' || p == 'morning_only' || p.contains('صباح')) {
       return 'صباحية';
-    if (p == 'evening' || p == 'evening_only' || p.contains('مساء'))
+    }
+    if (p == 'evening' || p == 'evening_only' || p.contains('مساء')) {
       return 'مسائية';
+    }
 
     return period;
   }

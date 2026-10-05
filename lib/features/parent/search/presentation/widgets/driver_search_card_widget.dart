@@ -7,6 +7,8 @@ class DriverSearchCardWidget extends StatelessWidget {
   final DriverSearchModel driver;
   final bool isSelected;
   final bool showPricing;
+  final bool isSubscriptionSearch;
+  final bool isTopRecommended;
   final double? calculatedPrice;
   final String? priceCaption;
   final bool showCheckbox;
@@ -21,6 +23,8 @@ class DriverSearchCardWidget extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     this.showPricing = true,
+    this.isSubscriptionSearch = false,
+    this.isTopRecommended = false,
     this.calculatedPrice,
     this.priceCaption,
     this.showCheckbox = false,
@@ -44,6 +48,11 @@ class DriverSearchCardWidget extends StatelessWidget {
 
     final displayPrice = calculatedPrice ?? driver.price;
     final displayCaption = priceCaption ?? 'ابتداءً من';
+
+    final bool showAiRecommendation =
+        isSubscriptionSearch &&
+        isTopRecommended &&
+        driver.aiRankingReasons.isNotEmpty;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
@@ -70,6 +79,47 @@ class DriverSearchCardWidget extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ─── AI Recommendation Badge (Top Header) ───
+              if (showAiRecommendation) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.primaryDark.withValues(alpha: 0.35)
+                        : AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.35),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 14,
+                        color:
+                            isDark ? AppColors.primaryLight : AppColors.primary,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'موصى به',
+                        style: AppTextStyles.style(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.bold,
+                          color: isDark
+                              ? AppColors.primaryLight
+                              : AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               // ─── Row 1: Avatar + Info + Price ───
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -236,12 +286,85 @@ class DriverSearchCardWidget extends StatelessWidget {
                 ],
               ),
 
+              // ─── AI Recommendation Reasons Container ───
+              if (showAiRecommendation) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.grey900.withValues(alpha: 0.5)
+                        : AppColors.grey100.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isDark ? AppColors.grey800 : AppColors.grey200,
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 13,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            'أسباب التوصية:',
+                            style: AppTextStyles.style(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? AppColors.grey200
+                                  : AppColors.textDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ...driver.aiRankingReasons.map(
+                        (reason) => Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '• ',
+                                style: AppTextStyles.style(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  reason,
+                                  style: AppTextStyles.style(
+                                    fontSize: 11.5,
+                                    color: subTextColor,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               const SizedBox(height: 16),
 
               // ─── Row 2: Action Buttons ───
               Row(
                 children: [
-                  // View Details (outlined with sky-blue border and white/card background)
+                  // View Details
                   Expanded(
                     flex: showMessageButton ? 2 : 1,
                     child: SizedBox(
@@ -249,7 +372,8 @@ class DriverSearchCardWidget extends StatelessWidget {
                       child: OutlinedButton(
                         onPressed: onTap,
                         style: OutlinedButton.styleFrom(
-                          backgroundColor: isDark ? AppColors.surfaceDark : Colors.white,
+                          backgroundColor:
+                              isDark ? AppColors.surfaceDark : Colors.white,
                           foregroundColor: cs.primary,
                           side: BorderSide(color: cs.primary, width: 1.5),
                           elevation: 0,

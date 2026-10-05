@@ -117,6 +117,9 @@ class DriverSearchModel {
   final int driverId;
   final int userId;
   final int availableSeats;
+  final int? aiRank;
+  final double? aiScore;
+  final List<String> aiRankingReasons;
 
   DriverSearchModel({
     required this.driver,
@@ -127,6 +130,9 @@ class DriverSearchModel {
     required this.driverId,
     required this.userId,
     required this.availableSeats,
+    this.aiRank,
+    this.aiScore,
+    this.aiRankingReasons = const [],
   });
 
   // Getters to maintain backward compatibility with existing UI
@@ -170,6 +176,21 @@ class DriverSearchModel {
             .toList()
         : <BreakdownModelInfo>[];
 
+    final rawReasons = json['ai_ranking_reasons'];
+    final List<String> parsedReasons = rawReasons is List
+        ? rawReasons
+            .where((e) => e != null)
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList()
+        : <String>[];
+
+    final rawRank = json['ai_rank'];
+    final int? parsedRank = rawRank != null ? _readInt(rawRank) : null;
+
+    final rawScore = json['ai_score'];
+    final double? parsedScore = rawScore != null ? _readDouble(rawScore) : null;
+
     return DriverSearchModel(
       driver: DriverModelInfo.fromJson(json),
       vehicle: VehicleModelInfo.fromJson(
@@ -186,6 +207,9 @@ class DriverSearchModel {
           : _readInt(json['id']),
       userId: _readInt(json['user_id']),
       availableSeats: _readInt(json['available_seats']),
+      aiRank: parsedRank,
+      aiScore: parsedScore,
+      aiRankingReasons: parsedReasons,
     );
   }
 }

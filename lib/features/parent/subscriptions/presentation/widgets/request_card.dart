@@ -79,15 +79,19 @@ class RequestCard extends StatelessWidget {
                       shape: BoxShape.circle, color: statusColor),
                 ),
                 SizedBox(width: 6.w),
-                Text(
-                  request.statusDisplayLabel,
-                  style: AppTextStyles.style(
-                    fontSize: 12.sp,
-                    fontWeight: FontWeight.bold,
-                    color: statusColor,
+                Expanded(
+                  child: Text(
+                    request.statusDisplayLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.style(
+                      fontSize: 12.sp,
+                      fontWeight: FontWeight.bold,
+                      color: statusColor,
+                    ),
                   ),
                 ),
-                const Spacer(),
+                SizedBox(width: 8.w),
                 Text(
                   _formatDate(request.createdAt),
                   style: AppTextStyles.style(
@@ -115,6 +119,8 @@ class RequestCard extends StatelessWidget {
                         children: [
                           Text(
                             driver.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: AppTextStyles.style(
                               fontSize: 14.sp,
                               fontWeight: FontWeight.bold,
@@ -126,6 +132,8 @@ class RequestCard extends StatelessWidget {
                           if (driver.phone != null)
                             Text(
                               driver.phone!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: AppTextStyles.style(
                                 fontSize: 12.sp,
                                 color: isDark
@@ -200,15 +208,20 @@ class RequestCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'الإجمالي بعد الخصم',
-                        style: AppTextStyles.style(
-                          fontSize: 12.sp,
-                          color: isDark
-                              ? AppColors.grey400
-                              : AppColors.grey600,
+                      Expanded(
+                        child: Text(
+                          'الإجمالي بعد الخصم',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.style(
+                            fontSize: 12.sp,
+                            color: isDark
+                                ? AppColors.grey400
+                                : AppColors.grey600,
+                          ),
                         ),
                       ),
+                      SizedBox(width: 8.w),
                       Text(
                         request.formattedTotalPrice,
                         style: AppTextStyles.style(
@@ -342,7 +355,7 @@ class RequestCard extends StatelessWidget {
               child: CachedNetworkImage(
                 imageUrl: driver.photoUrl!,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Center(
+                errorWidget: (_, _, _) => Center(
                   child: Text(initials,
                       style: AppTextStyles.style(
                           fontSize: 16.sp,

@@ -93,8 +93,10 @@ class DriverEmergencyCubit extends Cubit<DriverEmergencyState> {
       final message = res['message']?.toString() ??
           'تم قبول مهمة الاستبدال بنجاح وتعيينك لنقل الطلاب.';
 
-      int? substituteTripId;
-      if (res['data'] is Map) {
+      // الباك يرجّع substitute_trip_id بأول مستوى بالرد، و data احتياط
+      // لو تغيّر شكل الرد. ممكن تكون رحلة البديل نفسها (مدموجة) أو رحلة إنقاذ جديدة
+      int? substituteTripId = int.tryParse(res['substitute_trip_id']?.toString() ?? '');
+      if (substituteTripId == null && res['data'] is Map) {
         substituteTripId = int.tryParse(
           res['data']['substitute_trip_id']?.toString() ?? '',
         );

@@ -352,6 +352,9 @@ class ByChildrenSearchWidget extends StatelessWidget {
                   driver: driver,
                   isSelected: false,
                   showPricing: true,
+                  isSubscriptionSearch: true,
+                  // السيرفر يرجّع السواقين مرتبين بالـ AI، فالتوصية للأول فقط
+                  isTopRecommended: i == 0,
                   calculatedPrice: totalPrice,
                   priceCaption: 'يشمل الأطفال المحددين',
                   showCheckbox: false,

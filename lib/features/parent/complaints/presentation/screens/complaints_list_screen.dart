@@ -65,6 +65,8 @@ class _ComplaintsListScreenState extends State<ComplaintsListScreen>
             surfaceTintColor: Colors.transparent,
             bottom: TabBar(
               controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
               indicatorColor: theme.colorScheme.primary,
               indicatorWeight: 3,
               labelColor: theme.colorScheme.primary,

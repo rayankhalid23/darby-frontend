@@ -254,7 +254,7 @@ class SubscriptionCard extends StatelessWidget {
                     child: CachedNetworkImage(
                       imageUrl: child.photoUrl!,
                       fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Center(
+                      errorWidget: (_, _, _) => Center(
                         child: Text(child.avatarInitials,
                             style: AppTextStyles.style(
                                 fontSize: 11.sp,
@@ -337,7 +337,7 @@ class SubscriptionCard extends StatelessWidget {
               child: CachedNetworkImage(
                 imageUrl: driver.avatarUrl!,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => Center(
+                errorWidget: (_, _, _) => Center(
                     child: Text(initials,
                         style: AppTextStyles.style(
                             fontSize: 16.sp,

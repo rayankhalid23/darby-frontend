@@ -56,8 +56,8 @@ class NotificationRemoteDataSource {
   }) async {
     final queryParams = <String, dynamic>{
       'page': page,
-      if (perPage != null) 'per_page': perPage,
-      if (unreadOnly != null) 'unread_only': unreadOnly,
+      'per_page': ?perPage,
+      'unread_only': ?unreadOnly,
       if (type != null && type.isNotEmpty) 'type': type,
     };
 

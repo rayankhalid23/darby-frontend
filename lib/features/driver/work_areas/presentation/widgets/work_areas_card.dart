@@ -66,7 +66,8 @@ class _WorkAreasCardContent extends StatelessWidget {
     return BlocBuilder<DriverPreferencesCubit, DriverPreferencesState>(
       builder: (context, state) {
         final areas = _extractAreaNames(state);
-        final isLoading = state is DriverPreferencesLoading;
+        final isLoading =
+            state is DriverPreferencesLoading || state is DriverPreferencesInitial;
 
         return Container(
           padding: const EdgeInsets.all(16),

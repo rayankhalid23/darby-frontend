@@ -34,7 +34,7 @@ class ParentRemoteDataSource {
       );
       data = FormData.fromMap({
         ...request.toJson(),
-        if (multipart != null) 'avatar': multipart,
+        'avatar': ?multipart,
       });
     } else {
       data = request.toJson();
@@ -62,7 +62,7 @@ class ParentRemoteDataSource {
         'label': label,
         'lat': lat,
         'lng': lng,
-        if (zoneId != null) 'zone_id': zoneId,
+        'zone_id': ?zoneId,
         'is_default': isDefault,
       },
       headers: {

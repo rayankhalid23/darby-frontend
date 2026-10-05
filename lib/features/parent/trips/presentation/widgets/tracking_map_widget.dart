@@ -7,8 +7,11 @@ import 'package:kids_transport/core/theme/app_colors.dart';
 import 'package:kids_transport/core/theme/text_styles.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
 import 'package:kids_transport/core/services/osrm_routing_service.dart';
+import 'package:kids_transport/core/services/road_route_tracker.dart';
+import 'package:kids_transport/core/utils/smooth_marker_motion.dart';
 import '../../data/models/active_trip_model.dart';
 import '../../data/models/trip_track_model.dart';
+import '../../logic/trip_tracking_cubit/trip_tracking_state.dart';
 
 class TrackingMapWidget extends StatefulWidget {
   final MapController mapController;
@@ -19,6 +22,9 @@ class TrackingMapWidget extends StatefulWidget {
   final List<ActiveTripModel> multiTrips;
   final Function(int tripId)? onSelectTrip;
 
+  /// رسالة تظهر فوق الخريطة لما يفشل جلب موقع السائق (مثلاً رفض قواعد Firestore)
+  final String? locationErrorMessage;
+
   const TrackingMapWidget({
     super.key,
     required this.mapController,
@@ -28,18 +34,49 @@ class TrackingMapWidget extends StatefulWidget {
     this.multiTracks = const [],
     this.multiTrips = const [],
     this.onSelectTrip,
+    this.locationErrorMessage,
   });
+
+  /// رسالة الخطأ المعروضة فوق الخريطة حسب حالة التتبع (مشتركة بين شاشات التتبع)
+  static String? locationErrorFrom(TripTrackingState state) {
+    if (state is TripTrackingError) return 'تعذر جلب موقع السائق حالياً';
+    if (state is TripTrackingSingleLoaded && state.isOffline) {
+      return state.offlineMessage ?? 'تعذر تحديث موقع السائق';
+    }
+    return null;
+  }
 
   @override
   State<TrackingMapWidget> createState() => _TrackingMapWidgetState();
 }
 
-class _TrackingMapWidgetState extends State<TrackingMapWidget> {
+class _TrackingMapWidgetState extends State<TrackingMapWidget> with TickerProviderStateMixin {
   static const LatLng defaultLocation = LatLng(32.8872, 13.1913);
 
-  final Map<String, List<LatLng>> _routeCache = {};
-  final Map<String, RouteResult> _routeResultCache = {};
-  final Set<String> _pendingRouteRequests = {};
+  /// مسار شوارع ثابت لكل (رحلة، وجهة): يتقصّ مع حركة الحافلة بدل ما
+  /// يتطلب من جديد ويترسم مستقيم مع كل تحديث للموقع
+  final Map<String, RoadRouteTracker> _routeTrackers = {};
+
+  /// الكاميرا تتبع الحافلة تلقائياً، وتتوقف لما ولي الأمر يحرّك الخريطة بيده
+  /// لين يضغط زر التوسيط
+  bool _followDriver = true;
+
+  static bool _hasLocation(double lat, double lng) => lat != 0.0 && lng != 0.0;
+
+  /// نقطة تمركز للرحلة لما موقع السائق مش متوفر: الوجهة ثم المدرسة ثم المنزل
+  LatLng? _tripAnchor(ActiveTripModel? trip) {
+    if (trip == null) return null;
+    if (_hasLocation(trip.destination.lat, trip.destination.lng)) {
+      return LatLng(trip.destination.lat, trip.destination.lng);
+    }
+    if (trip.uniqueSchools.isNotEmpty) {
+      return LatLng(trip.uniqueSchools.first.lat, trip.uniqueSchools.first.lng);
+    }
+    if (trip.uniqueHomeAddresses.isNotEmpty) {
+      return LatLng(trip.uniqueHomeAddresses.first.lat, trip.uniqueHomeAddresses.first.lng);
+    }
+    return null;
+  }
 
   final List<Color> _paletteColors = const [
     AppColors.primaryLight,
@@ -49,79 +86,62 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
     AppColors.maleBlue,
   ];
 
-  @override
-  void didUpdateWidget(covariant TrackingMapWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
+  /// حركة سلسة لأيقونة كل حافلة (المفتاح رقم الرحلة)
+  final Map<int, SmoothMarkerMotion> _motions = {};
 
-    if (!widget.isMultiMode && widget.singleTrack != null) {
-      final oldLat = oldWidget.singleTrack?.driverLat ?? 0.0;
-      final oldLng = oldWidget.singleTrack?.driverLng ?? 0.0;
-      final newLat = widget.singleTrack!.driverLat;
-      final newLng = widget.singleTrack!.driverLng;
+  /// الرحلة اللي الكاميرا تتبع حافلتها
+  int? _followTripId;
 
-      if (newLat != 0.0 && newLng != 0.0 && (newLat != oldLat || newLng != oldLng)) {
-        debugPrint('🚗 [LIVE TRACKING] Driver moved to Lat: $newLat, Lng: $newLng. Auto-moving camera!');
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            try {
-              widget.mapController.move(
-                LatLng(newLat, newLng),
-                widget.mapController.camera.zoom,
-              );
-            } catch (_) {}
-          }
-        });
-      }
-    } else if (widget.isMultiMode && widget.multiTracks.isNotEmpty) {
-      final newValid = widget.multiTracks.firstWhere(
-        (t) => t.driverLat != 0.0 && t.driverLng != 0.0,
-        orElse: () => widget.multiTracks.first,
-      );
-      if (newValid.driverLat != 0.0 && newValid.driverLng != 0.0) {
-        final oldValid = oldWidget.multiTracks.firstWhere(
-          (t) => t.driverLat != 0.0 && t.driverLng != 0.0,
-          orElse: () => newValid,
-        );
-        if (newValid.driverLat != oldValid.driverLat || newValid.driverLng != oldValid.driverLng) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              try {
-                widget.mapController.move(
-                  LatLng(newValid.driverLat, newValid.driverLng),
-                  widget.mapController.camera.zoom,
-                );
-              } catch (_) {}
-            }
-          });
-        }
-      }
+  SmoothMarkerMotion _motionFor(int tripId) => _motions.putIfAbsent(tripId, () {
+        final motion = SmoothMarkerMotion(vsync: this);
+        motion.controller.addListener(() => _followMotion(tripId));
+        return motion;
+      });
+
+  /// الكاميرا تمشي مع الحافلة فريم بفريم بدل ما تقفز
+  void _followMotion(int tripId) {
+    if (!_followDriver || tripId != _followTripId) return;
+    final position = _motions[tripId]?.position;
+    if (position == null) return;
+    try {
+      widget.mapController.move(position, widget.mapController.camera.zoom);
+    } catch (_) {
+      // الخريطة مازالت ما جهزتش
     }
   }
 
-  List<LatLng> _getPolylinePoints(LatLng start, LatLng end) {
-    if (start.latitude == 0.0 || start.longitude == 0.0 || end.latitude == 0.0 || end.longitude == 0.0) {
-      return [start, end];
+  void _syncMotions(Map<int, LatLng> targets, int? followTripId) {
+    if (!mounted) return;
+    _followTripId = followTripId;
+    targets.forEach((tripId, target) {
+      // قفزة مباشرة (أول موقع) ما تشغّلش أنيميشن، فنحرّك الكاميرا يدوياً
+      if (!_motionFor(tripId).moveTo(target)) _followMotion(tripId);
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final motion in _motions.values) {
+      motion.dispose();
     }
+    super.dispose();
+  }
 
-    final key = '${start.latitude.toStringAsFixed(4)},${start.longitude.toStringAsFixed(4)}->${end.latitude.toStringAsFixed(4)},${end.longitude.toStringAsFixed(4)}';
-
-    if (_routeCache.containsKey(key)) {
-      return _routeCache[key]!;
+  List<LatLng> _getPolylinePoints(int tripId, LatLng driver, LatLng destination) {
+    if (!_hasLocation(driver.latitude, driver.longitude) ||
+        !_hasLocation(destination.latitude, destination.longitude)) {
+      return const [];
     }
-
-    if (!_pendingRouteRequests.contains(key)) {
-      _pendingRouteRequests.add(key);
-      OsrmRoutingService.fetchRoute([start, end]).then((result) {
-        _pendingRouteRequests.remove(key);
-        _routeCache[key] = result.points;
-        _routeResultCache[key] = result;
-        if (mounted) {
-          setState(() {});
-        }
-      });
-    }
-
-    return [start, end];
+    final key = '$tripId->${destination.latitude.toStringAsFixed(5)},${destination.longitude.toStringAsFixed(5)}';
+    final tracker = _routeTrackers.putIfAbsent(
+      key,
+      () => RoadRouteTracker(
+        onUpdated: () {
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+    return tracker.update(driver, [destination]);
   }
 
   Future<void> _openGoogleMaps(double lat, double lng) async {
@@ -150,6 +170,7 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
   }
 
   void _centerDriver() {
+    _followDriver = true;
     LatLng target = defaultLocation;
 
     if (!widget.isMultiMode && widget.singleTrack != null && widget.singleTrack!.driverLat != 0.0 && widget.singleTrack!.driverLng != 0.0) {
@@ -177,6 +198,10 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
       }
     }
 
+    // الحافلة المرسومة متأخرة شوية على موقعها الحقيقي — نتمركز عليها هي
+    final drawnBus = _followTripId != null ? _motions[_followTripId]?.position : null;
+    if (drawnBus != null) target = drawnBus;
+
     debugPrint('🎯 [MAP RE-CENTER] Moving camera to Lat: ${target.latitude}, Lng: ${target.longitude}');
     widget.mapController.move(target, widget.isMultiMode ? 13.5 : 15.0);
   }
@@ -188,71 +213,65 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
     LatLng initialCenter = defaultLocation;
 
     // Build effective tracking list for MultiMode
-    List<LiveTrackingModel> effectiveMultiTracks = widget.multiTracks;
-    if (widget.isMultiMode && effectiveMultiTracks.isEmpty && widget.multiTrips.isNotEmpty) {
-      effectiveMultiTracks = widget.multiTrips.map((trip) {
-        double lat = trip.destination.lat;
-        double lng = trip.destination.lng;
-        if ((lat == 0.0 || lng == 0.0) && trip.uniqueSchools.isNotEmpty) {
-          lat = trip.uniqueSchools.first.lat;
-          lng = trip.uniqueSchools.first.lng;
+    // الرحلات اللي ما وصلهاش موقع من Firestore تاخذ آخر موقع للسائق من الباك
+    // (trip.driver.lat/lng)، ولو ما فيش يقعد (0,0) = "موقع غير معروف":
+    // تنرسم وجهاتها بدون حافلة وهمية عند المدرسة
+    final List<LiveTrackingModel> effectiveMultiTracks = List.of(widget.multiTracks);
+    if (widget.isMultiMode) {
+      for (final trip in widget.multiTrips) {
+        if (!effectiveMultiTracks.any((t) => t.tripId == trip.tripId)) {
+          effectiveMultiTracks.add(
+            LiveTrackingModel(
+              tripId: trip.tripId,
+              status: trip.status,
+              driverLat: trip.driver.lat,
+              driverLng: trip.driver.lng,
+              driverName: trip.driver.name,
+              lastUpdated: 'من الباك إند',
+            ),
+          );
         }
-        if ((lat == 0.0 || lng == 0.0) && trip.uniqueHomeAddresses.isNotEmpty) {
-          lat = trip.uniqueHomeAddresses.first.lat;
-          lng = trip.uniqueHomeAddresses.first.lng;
-        }
-        return LiveTrackingModel(
-          tripId: trip.tripId,
-          status: trip.status,
-          driverLat: lat,
-          driverLng: lng,
-          driverName: trip.driver.name,
-          lastUpdated: 'من الباك إند',
-        );
-      }).toList();
+      }
     }
 
     // Build effective single track
+    // لو Firestore ما بعتش موقع، ناخذوا آخر موقع للسائق من الباك فقط —
+    // بدون ما نحطوا الحافلة عند البيت أو المدرسة كأنها موقع حقيقي
     LiveTrackingModel? effectiveSingleTrack = widget.singleTrack;
-    if (!widget.isMultiMode && (effectiveSingleTrack == null || effectiveSingleTrack.driverLat == 0.0) && widget.singleTrip != null) {
+    if (!widget.isMultiMode &&
+        (effectiveSingleTrack == null ||
+            !_hasLocation(effectiveSingleTrack.driverLat, effectiveSingleTrack.driverLng)) &&
+        widget.singleTrip != null) {
       final trip = widget.singleTrip!;
-      double lat = trip.driver.lat;
-      double lng = trip.driver.lng;
-      if ((lat == 0.0 || lng == 0.0) && trip.uniqueHomeAddresses.isNotEmpty) {
-        lat = trip.uniqueHomeAddresses.first.lat;
-        lng = trip.uniqueHomeAddresses.first.lng;
-      }
-      if ((lat == 0.0 || lng == 0.0) && trip.uniqueSchools.isNotEmpty) {
-        lat = trip.uniqueSchools.first.lat;
-        lng = trip.uniqueSchools.first.lng;
-      }
-      if ((lat == 0.0 || lng == 0.0)) {
-        lat = trip.destination.lat;
-        lng = trip.destination.lng;
-      }
       if (effectiveSingleTrack == null) {
         effectiveSingleTrack = LiveTrackingModel(
           tripId: trip.tripId,
           status: trip.status,
-          driverLat: lat,
-          driverLng: lng,
+          driverLat: trip.driver.lat,
+          driverLng: trip.driver.lng,
           driverName: trip.driver.name,
           lastUpdated: 'من الباك إند',
         );
-      } else {
+      } else if (_hasLocation(trip.driver.lat, trip.driver.lng)) {
         effectiveSingleTrack = effectiveSingleTrack.copyWith(
-          driverLat: lat != 0.0 ? lat : effectiveSingleTrack.driverLat,
-          driverLng: lng != 0.0 ? lng : effectiveSingleTrack.driverLng,
+          driverLat: trip.driver.lat,
+          driverLng: trip.driver.lng,
         );
       }
     }
 
+    bool anyDriverLocation = false;
+    // أيقونات الحافلات تنرسم في طبقة منفصلة تتحرك بسلاسة (فوق باقي العلامات)
+    final List<_BusMarker> busMarkers = [];
+
     if (!widget.isMultiMode && effectiveSingleTrack != null) {
-      final driverLatLng = LatLng(
-        effectiveSingleTrack.driverLat != 0.0 ? effectiveSingleTrack.driverLat : defaultLocation.latitude,
-        effectiveSingleTrack.driverLng != 0.0 ? effectiveSingleTrack.driverLng : defaultLocation.longitude,
-      );
-      initialCenter = driverLatLng;
+      final hasDriverLocation =
+          _hasLocation(effectiveSingleTrack.driverLat, effectiveSingleTrack.driverLng);
+      anyDriverLocation = hasDriverLocation;
+      final driverLatLng = LatLng(effectiveSingleTrack.driverLat, effectiveSingleTrack.driverLng);
+      initialCenter = hasDriverLocation
+          ? driverLatLng
+          : (_tripAnchor(widget.singleTrip) ?? defaultLocation);
 
       // Destination / Schools / Home markers with Name Tag above
       final List<ChildSchoolModel> uniqueSchools = widget.singleTrip?.uniqueSchools ??
@@ -276,13 +295,15 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
           ),
         );
 
-        polylines.add(
-          Polyline(
-            points: _getPolylinePoints(driverLatLng, schoolLatLng),
-            strokeWidth: 5.0,
-            color: context.primaryColor,
-          ),
-        );
+        if (hasDriverLocation) {
+          polylines.add(
+            Polyline(
+              points: _getPolylinePoints(effectiveSingleTrack.tripId, driverLatLng, schoolLatLng),
+              strokeWidth: 5.0,
+              color: context.primaryColor,
+            ),
+          );
+        }
       }
 
       // Render Unique Home Addresses (Deduplicated)
@@ -301,13 +322,15 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
           ),
         );
 
-        polylines.add(
-          Polyline(
-            points: _getPolylinePoints(driverLatLng, homeLatLng),
-            strokeWidth: 5.0,
-            color: AppColors.accentPurple,
-          ),
-        );
+        if (hasDriverLocation) {
+          polylines.add(
+            Polyline(
+              points: _getPolylinePoints(effectiveSingleTrack.tripId, driverLatLng, homeLatLng),
+              strokeWidth: 5.0,
+              color: AppColors.accentPurple,
+            ),
+          );
+        }
       }
 
       // Fallback for destination if unique arrays are empty
@@ -336,54 +359,65 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
             ),
           );
 
-          polylines.add(
-            Polyline(
-              points: _getPolylinePoints(driverLatLng, destLatLng),
-              strokeWidth: 5.0,
-              color: isHomeDest ? AppColors.accentPurple : context.primaryColor,
-            ),
-          );
+          if (hasDriverLocation) {
+            polylines.add(
+              Polyline(
+                points: _getPolylinePoints(effectiveSingleTrack.tripId, driverLatLng, destLatLng),
+                strokeWidth: 5.0,
+                color: isHomeDest ? AppColors.accentPurple : context.primaryColor,
+              ),
+            );
+          }
         }
       }
 
       // 🌟 DRIVER MARKER ADDED LAST (To render ON TOP of destination/home markers Z-Index)
-      markers.add(
-        Marker(
-          point: driverLatLng,
-          width: 75.w,
-          height: 75.h,
-          child: GestureDetector(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'السائق: ${widget.singleTrip?.driverName ?? effectiveSingleTrack?.driverName ?? "السائق"}',
+      // فقط لو موقع السائق الحقيقي متوفر
+      if (hasDriverLocation) {
+        busMarkers.add(
+          _BusMarker(
+            tripId: effectiveSingleTrack.tripId,
+            target: driverLatLng,
+            width: 75.w,
+            height: 75.h,
+            child: GestureDetector(
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'السائق: ${widget.singleTrip?.driverName ?? effectiveSingleTrack?.driverName ?? "السائق"}',
+                    ),
+                    duration: const Duration(seconds: 2),
                   ),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            },
-            child: _buildDriverBusMarker(
-              context,
-              context.primaryColor,
-              widget.singleTrip?.driverName ?? effectiveSingleTrack.driverName ?? 'السائق',
+                );
+              },
+              child: _buildDriverBusMarker(
+                context,
+                context.primaryColor,
+                widget.singleTrip?.driverName ?? effectiveSingleTrack.driverName ?? 'السائق',
+              ),
             ),
           ),
-        ),
-      );
+        );
+      }
     } else if (widget.isMultiMode && effectiveMultiTracks.isNotEmpty) {
-      initialCenter = LatLng(
-        effectiveMultiTracks.first.driverLat != 0.0 ? effectiveMultiTracks.first.driverLat : defaultLocation.latitude,
-        effectiveMultiTracks.first.driverLng != 0.0 ? effectiveMultiTracks.first.driverLng : defaultLocation.longitude,
-      );
+      LatLng? firstLive;
+      for (final t in effectiveMultiTracks) {
+        if (_hasLocation(t.driverLat, t.driverLng)) {
+          firstLive = LatLng(t.driverLat, t.driverLng);
+          break;
+        }
+      }
+      anyDriverLocation = firstLive != null;
+      initialCenter = firstLive ??
+          (widget.multiTrips.isNotEmpty ? _tripAnchor(widget.multiTrips.first) : null) ??
+          defaultLocation;
 
       for (int i = 0; i < effectiveMultiTracks.length; i++) {
         final track = effectiveMultiTracks[i];
         final color = _paletteColors[i % _paletteColors.length];
-        final driverLatLng = LatLng(
-          track.driverLat != 0.0 ? track.driverLat : defaultLocation.latitude,
-          track.driverLng != 0.0 ? track.driverLng : defaultLocation.longitude,
-        );
+        final hasDriverLocation = _hasLocation(track.driverLat, track.driverLng);
+        final driverLatLng = LatLng(track.driverLat, track.driverLng);
 
         ActiveTripModel? tripMatch;
         try {
@@ -392,26 +426,29 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
           );
         } catch (_) {}
 
-        // Driver Marker
-        markers.add(
-          Marker(
-            point: driverLatLng,
-            width: 70.w,
-            height: 70.h,
-            child: GestureDetector(
-              onTap: () {
-                if (widget.onSelectTrip != null) {
-                  widget.onSelectTrip!(track.tripId);
-                }
-              },
-              child: _buildDriverBusMarker(
-                context,
-                color,
-                tripMatch?.driverName ?? track.driverName ?? 'حافلة ${i + 1}',
+        // Driver Marker — فقط لو موقع السائق الحقيقي متوفر
+        if (hasDriverLocation) {
+          busMarkers.add(
+            _BusMarker(
+              tripId: track.tripId,
+              target: driverLatLng,
+              width: 70.w,
+              height: 70.h,
+              child: GestureDetector(
+                onTap: () {
+                  if (widget.onSelectTrip != null) {
+                    widget.onSelectTrip!(track.tripId);
+                  }
+                },
+                child: _buildDriverBusMarker(
+                  context,
+                  color,
+                  tripMatch?.driverName ?? track.driverName ?? 'حافلة ${i + 1}',
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
 
         // Destination Markers (Deduplicated across tripMatch or track)
         final List<ChildSchoolModel> uniqueSchools = tripMatch?.uniqueSchools ?? track.uniqueSchools;
@@ -432,13 +469,15 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
                 ),
               ),
             );
-            polylines.add(
-              Polyline(
-                points: _getPolylinePoints(driverLatLng, schoolLatLng),
-                strokeWidth: 5.0,
-                color: color,
-              ),
-            );
+            if (hasDriverLocation) {
+              polylines.add(
+                Polyline(
+                  points: _getPolylinePoints(track.tripId, driverLatLng, schoolLatLng),
+                  strokeWidth: 5.0,
+                  color: color,
+                ),
+              );
+            }
           }
         }
 
@@ -457,13 +496,15 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
                 ),
               ),
             );
-            polylines.add(
-              Polyline(
-                points: _getPolylinePoints(driverLatLng, homeLatLng),
-                strokeWidth: 5.0,
-                color: color,
-              ),
-            );
+            if (hasDriverLocation) {
+              polylines.add(
+                Polyline(
+                  points: _getPolylinePoints(track.tripId, driverLatLng, homeLatLng),
+                  strokeWidth: 5.0,
+                  color: color,
+                ),
+              );
+            }
           }
         }
 
@@ -492,13 +533,15 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
               ),
             );
 
-            polylines.add(
-              Polyline(
-                points: _getPolylinePoints(driverLatLng, destLatLng),
-                strokeWidth: 5.0,
-                color: color,
-              ),
-            );
+            if (hasDriverLocation) {
+              polylines.add(
+                Polyline(
+                  points: _getPolylinePoints(track.tripId, driverLatLng, destLatLng),
+                  strokeWidth: 5.0,
+                  color: color,
+                ),
+              );
+            }
           }
         }
       }
@@ -515,6 +558,11 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
       '=================================================================\n',
     );
 
+    // نبدأ الحركة بعد الفريم (تشغيل الأنيميشن أثناء build غير مسموح)
+    final busTargets = {for (final bus in busMarkers) bus.tripId: bus.target};
+    final followTripId = busMarkers.isNotEmpty ? busMarkers.first.tripId : null;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncMotions(busTargets, followTripId));
+
     return Stack(
       children: [
         FlutterMap(
@@ -522,26 +570,58 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
           options: MapOptions(
             initialCenter: initialCenter,
             initialZoom: widget.isMultiMode ? 13.0 : 15.0,
+            // تحريك الخريطة باليد يوقف التتبع التلقائي لين يضغط زر التوسيط
+            onPositionChanged: (camera, hasGesture) {
+              if (hasGesture) _followDriver = false;
+            },
           ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.kids_transport.app',
             ),
-            PolylineLayer(polylines: polylines),
+            // المسار اللي مازال ما وصلش من الشوارع ما ينرسمش (بدل خط مستقيم)
+            PolylineLayer(
+              polylines: polylines.where((p) => p.points.length >= 2).toList(),
+            ),
             MarkerLayer(markers: markers),
+            if (busMarkers.isNotEmpty)
+              AnimatedBuilder(
+                animation: Listenable.merge([
+                  for (final bus in busMarkers) _motionFor(bus.tripId).controller,
+                ]),
+                builder: (context, _) => MarkerLayer(
+                  markers: [
+                    for (final bus in busMarkers)
+                      Marker(
+                        point: _motions[bus.tripId]?.position ?? bus.target,
+                        width: bus.width,
+                        height: bus.height,
+                        child: bus.child,
+                      ),
+                  ],
+                ),
+              ),
           ],
         ),
 
         // Live ETA & Distance Overlay Banner for Parents
-        if (_routeResultCache.isNotEmpty) ...[
+        if (anyDriverLocation && widget.locationErrorMessage == null && _routeTrackers.isNotEmpty) ...[
           Builder(
             builder: (context) {
-              final validResult = _routeResultCache.values.firstWhere(
-                (r) => r.distanceMeters > 0,
-                orElse: () => _routeResultCache.values.first,
-              );
-              if (validResult.distanceMeters <= 0) return const SizedBox.shrink();
+              // المسافة والوقت المتبقيين من مسار الحافلة المتتبَّعة (يتحدّثوا مع حركتها)
+              final followPrefix = '$followTripId->';
+              RouteResult? validResult;
+              for (final entry in _routeTrackers.entries) {
+                final remaining = entry.value.remaining;
+                if (remaining == null || remaining.distanceMeters <= 0) continue;
+                if (entry.key.startsWith(followPrefix)) {
+                  validResult = remaining;
+                  break;
+                }
+                validResult ??= remaining;
+              }
+              if (validResult == null) return const SizedBox.shrink();
               final destTitle = widget.singleTrip?.destination.name ??
                   widget.singleTrack?.destination?.name ??
                   'المحطة المستهدفة';
@@ -616,6 +696,60 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
             },
           ),
         ],
+
+        // بانر بدل الحافلة الوهمية: موقع السائق مازال ما وصلش أو فشل جلبه
+        if (widget.locationErrorMessage != null ||
+            (!anyDriverLocation && (widget.singleTrip != null || widget.multiTrips.isNotEmpty)))
+          Positioned(
+            top: 16.h,
+            right: 16.w,
+            left: 75.w,
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 10.h),
+              decoration: BoxDecoration(
+                color: context.isDarkMode ? AppColors.surfaceDark : AppColors.white,
+                borderRadius: BorderRadius.circular(14.r),
+                border: Border.all(
+                  color: widget.locationErrorMessage != null
+                      ? AppColors.error.withValues(alpha: 0.4)
+                      : AppColors.primaryLight.withValues(alpha: 0.3),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.locationErrorMessage != null
+                        ? Icons.location_off_rounded
+                        : Icons.hourglass_bottom_rounded,
+                    color: widget.locationErrorMessage != null ? AppColors.error : AppColors.primaryLight,
+                    size: 20.r,
+                  ),
+                  SizedBox(width: 10.w),
+                  Expanded(
+                    child: Text(
+                      widget.locationErrorMessage ?? 'بانتظار موقع السائق…',
+                      style: AppTextStyles.style(
+                        fontSize: 12.sp,
+                        fontWeight: FontWeight.bold,
+                        color: widget.locationErrorMessage != null
+                            ? AppColors.error
+                            : context.textPrimary,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
         // Re-arranged Floating Buttons: 📍 Locate -> 🧭 Navigation -> ➕ Zoom In -> ➖ Zoom Out
         Positioned(
@@ -789,4 +923,22 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> {
       ),
     );
   }
+}
+
+/// بيانات أيقونة حافلة: موقعها الحقيقي الأخير وشكلها — الموقع المرسوم فعلياً
+/// يجي من SmoothMarkerMotion
+class _BusMarker {
+  final int tripId;
+  final LatLng target;
+  final double width;
+  final double height;
+  final Widget child;
+
+  const _BusMarker({
+    required this.tripId,
+    required this.target,
+    required this.width,
+    required this.height,
+    required this.child,
+  });
 }

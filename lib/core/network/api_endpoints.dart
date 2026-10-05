@@ -2,7 +2,7 @@ class ApiEndpoints {
   const ApiEndpoints._();
 
   // الرابط الأساسي للسيرفر (يحتوي على /api/)
-  static const String baseUrl = 'https://darby-app-api.loca.lt/api/';
+  static const String baseUrl = 'https://darby2003.onrender.com/api/';
 
   //=========================================
   // Auth Endpoints (مسارات المصادقة العامة)

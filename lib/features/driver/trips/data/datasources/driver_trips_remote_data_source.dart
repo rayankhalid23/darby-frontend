@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:kids_transport/core/network/api_client.dart';
@@ -11,6 +12,7 @@ import 'package:kids_transport/features/driver/trips/data/models/driver_trip_his
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_live_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_stop_model.dart';
+import 'package:kids_transport/features/driver/trips/data/models/proximity_alert_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/trip_action_result_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/vehicle_breakdown_model.dart';
 
@@ -101,7 +103,8 @@ class DriverTripsRemoteDataSource {
     throw const ApiException('تعذر تحميل بيانات الرحلة الحية.');
   }
 
-  Future<void> updateLocation(
+  /// يرسل الموقع ويرجّع تنبيهات الاقتراب (proximity.alerts) إن وُجدت
+  Future<List<ProximityAlertModel>> updateLocation(
     int tripId, {
     required double latitude,
     required double longitude,
@@ -122,17 +125,16 @@ class DriverTripsRemoteDataSource {
       },
       headers: _authHeader,
     );
-    _unwrap(response.data, 'تعذر تحديث الموقع.');
+    final map = _unwrap(response.data, 'تعذر تحديث الموقع.');
+    // الكتابة في Firestore تتم من LiveTripCubit بالتوازي مع هذا الطلب (بحالة الرحلة
+    // الحقيقية)، فما نكرروهاش هنا — التكرار كان يقلّب status بين active وin_progress
 
-    // 🌟 push live location to Firestore as well for instant parent live stream sync
-    unawaited(pushLiveTrackingToFirestore(
-      tripId,
-      latitude: latitude,
-      longitude: longitude,
-      heading: heading,
-      speed: speed,
-      status: 'active',
-    ));
+    try {
+      return ProximityAlertModel.listFromLocationResponse(map);
+    } catch (_) {
+      // شكل غير متوقع للتنبيهات لا يجب أن يُفشل إرسال الموقع نفسه
+      return const [];
+    }
   }
 
   Future<void> updateGeneralDriverLocation({
@@ -183,8 +185,9 @@ class DriverTripsRemoteDataSource {
         },
         SetOptions(merge: true),
       );
-    } catch (_) {
-      // فشل صامت لتحديث Firestore، لا نكسر واجهة السائق أثناء القيادة
+    } catch (e) {
+      // لا نكسر واجهة السائق أثناء القيادة، لكن نطبع السبب (غالباً قواعد Firestore)
+      debugPrint('❌ [Firestore] فشل كتابة موقع السائق في trips_tracking/$tripId: $e');
     }
   }
 
@@ -200,8 +203,8 @@ class DriverTripsRemoteDataSource {
         },
         SetOptions(merge: true),
       );
-    } catch (_) {
-      // فشل صامت
+    } catch (e) {
+      debugPrint('❌ [Firestore] فشل تحديث حالة الرحلة في trips_tracking/$tripId: $e');
     }
   }
 

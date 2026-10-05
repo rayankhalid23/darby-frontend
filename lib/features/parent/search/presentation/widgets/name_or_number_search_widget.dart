@@ -153,6 +153,7 @@ class _NameOrNumberSearchWidgetState extends State<NameOrNumberSearchWidget> {
               isSelected: false,
               showPricing:
                   false, // لا تظهر الأسعار لأن الأطفال لم يتم تحديدهم بعد
+              isSubscriptionSearch: false,
               showCheckbox: false,
               onTap: () => widget.onDriverTapped(driver),
             );

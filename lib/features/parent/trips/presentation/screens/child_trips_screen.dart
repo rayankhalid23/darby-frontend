@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:kids_transport/core/widgets/app_user_avatar.dart';
 import 'package:kids_transport/core/theme/app_colors.dart';
 import 'package:kids_transport/core/theme/text_styles.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
@@ -94,7 +95,10 @@ class _ChildTripsScreenState extends State<ChildTripsScreen> {
                   radius: 30.r,
                   backgroundColor: AppColors.white.withValues(alpha: 0.2),
                   backgroundImage: model.childPhoto != null && model.childPhoto!.isNotEmpty
-                      ? CachedNetworkImageProvider(model.childPhoto!)
+                      ? CachedNetworkImageProvider(
+                          AppUserAvatar.resolveUrl(model.childPhoto)!,
+                          headers: AppUserAvatar.imageHeaders,
+                        )
                       : null,
                   child: model.childPhoto == null || model.childPhoto!.isEmpty
                       ? Icon(Icons.person_rounded, size: 32.r, color: AppColors.white)

@@ -171,7 +171,7 @@ class TripChildInfo {
       childId: json['child_id'] as int? ?? json['id'] as int? ?? 0,
       childName:
           json['child_name']?.toString() ?? json['name']?.toString() ?? '',
-      childPhoto: json['child_photo']?.toString() ?? json['photo']?.toString(),
+      childPhoto: json['child_photo']?.toString() ?? json['photo']?.toString() ?? json['photo_url']?.toString() ?? json['image']?.toString(),
       childStatus:
           json['child_status']?.toString() ?? json['status']?.toString() ?? '',
       pickupTime:

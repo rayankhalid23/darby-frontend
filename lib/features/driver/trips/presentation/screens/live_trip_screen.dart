@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -9,14 +11,18 @@ import 'package:latlong2/latlong.dart';
 import 'package:kids_transport/core/theme/app_colors.dart';
 import 'package:kids_transport/core/theme/app_theme.dart';
 import 'package:kids_transport/core/theme/text_styles.dart';
+import 'package:kids_transport/core/utils/smooth_marker_motion.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
 import 'package:kids_transport/core/widgets/primary_button.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_stop_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/live_trip_child_item.dart';
+import 'package:kids_transport/features/driver/trips/data/services/driver_location_source.dart';
 import 'package:kids_transport/features/driver/trips/logic/live_trip_cubit/live_trip_cubit.dart';
 import 'package:kids_transport/features/driver/trips/presentation/widgets/forgotten_children_dialog.dart';
+import 'package:kids_transport/features/driver/trips/presentation/widgets/mock_route_debug_panel.dart';
+import 'package:kids_transport/features/driver/trips/presentation/widgets/proximity_alert_banner.dart';
 
-import 'package:kids_transport/core/services/osrm_routing_service.dart';
+import 'package:kids_transport/core/services/road_route_tracker.dart';
 import 'package:kids_transport/features/driver/trips/presentation/widgets/trip_progress_bar.dart';
 import 'package:kids_transport/features/driver/trips/presentation/widgets/trip_child_action_card.dart';
 import 'package:kids_transport/features/driver/trips/data/models/vehicle_breakdown_model.dart';
@@ -33,11 +39,27 @@ class LiveTripScreen extends StatefulWidget {
 
 class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStateMixin {
   late final AnimatedMapController _animatedMapController;
+
+  /// حركة سلسة لأيقونة الحافلة بين تحديثات الـ GPS بدل القفز
+  late final SmoothMarkerMotion _busMotion;
+  final DriverLocationSource _locationSource = DriverLocationSource.instance;
+  StreamSubscription<Position>? _positionSub;
+  int _listenGeneration = 0;
   Position? _driverPosition;
   bool _isLocating = true;
   bool _mapReady = false;
-  List<LatLng> _roadPolylinePoints = [];
-  String _cachedRouteKey = '';
+  /// مسار الشوارع من الحافلة للمحطات المتبقية — يتقصّ مع حركة السائق
+  /// ويتطلب من جديد فقط لو تغيّرت المحطات أو خرج السائق عن المسار
+  late final RoadRouteTracker _routeTracker = RoadRouteTracker(
+    onUpdated: () {
+      if (mounted) setState(() {});
+    },
+  );
+  /// الخريطة مكبّرة على كامل الشاشة (تكبير في نفس الشاشة بدون فتح Route جديد)
+  bool _isMapExpanded = false;
+
+  /// بلاغ الطوارئ قيد الإرسال (جلب الموقع + الطلب)
+  bool _isReportingBreakdown = false;
 
   @override
   void initState() {
@@ -47,46 +69,75 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
       duration: const Duration(milliseconds: 700),
       curve: Curves.easeInOut,
     );
+    _busMotion = SmoothMarkerMotion(vsync: this, maxDuration: const Duration(seconds: 5));
     context.read<LiveTripCubit>().loadAll(widget.tripId);
     context.read<LiveTripCubit>().startBackgroundSync(widget.tripId);
+    _locationSource.mockEnabled.addListener(_onLocationModeChanged);
     _listenToPosition();
   }
 
   @override
   void dispose() {
+    _positionSub?.cancel();
+    _locationSource.mockEnabled.removeListener(_onLocationModeChanged);
+    // الخروج من الشاشة يرجّع دائماً للـ GPS الحقيقي
+    if (_locationSource.isMock) _locationSource.setMockEnabled(false);
     _animatedMapController.dispose();
+    _busMotion.dispose();
     super.dispose();
   }
 
-  Future<void> _listenToPosition() async {
+  /// عند التبديل بين GPS الحقيقي والمحاكاة نعيد الاشتراك بالمصدر الجديد
+  void _onLocationModeChanged() {
+    if (!mounted) return;
+    // الخريطة تُعاد بناؤها، فنوقف تتبع الكاميرا لين onMapReady من جديد
+    setState(() {
+      _isLocating = true;
+      _mapReady = false;
+    });
+    _listenToPosition();
+  }
+
+  Future<void> _toggleMockMode() async {
+    final enable = !_locationSource.isMock;
     try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      await _locationSource.setMockEnabled(enable);
+    } catch (e) {
+      debugPrint('❌ [LiveTripScreen] تعذر تشغيل المحاكاة: $e');
+      if (mounted) _showSnack('تعذر تحميل ملف مسار المحاكاة', isError: true);
+    }
+  }
+
+  Future<void> _listenToPosition() async {
+    // لو تبدّل المصدر أثناء الانتظار، نتجاهل نتيجة الاستدعاء القديم
+    final generation = ++_listenGeneration;
+    await _positionSub?.cancel();
+    _positionSub = null;
+    try {
+      final hasPermission = await _locationSource.ensurePermission();
+      if (generation != _listenGeneration) return;
+      if (!hasPermission) {
         if (mounted) setState(() => _isLocating = false);
         return;
       }
 
       // نجيب أول إحداثي فعلي قبل ما نرسم الخريطة، حتى ما نتمركز غلط على أول محطة
       // بدل موقع السائق الحقيقي (كان هذا سبب ظهور السائق "واقف" بالخريطة).
-      final initialPosition = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      final initialPosition = await _locationSource.getCurrentPosition();
+      if (generation != _listenGeneration) return;
       debugPrint(
         '📍 [LiveTripScreen] أول إحداثي GPS: lat=${initialPosition.latitude}, lng=${initialPosition.longitude}',
       );
       if (mounted) {
+        _busMotion.moveTo(LatLng(initialPosition.latitude, initialPosition.longitude));
         setState(() {
           _driverPosition = initialPosition;
           _isLocating = false;
         });
       }
 
-      Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5),
-      ).listen(
+      if (!mounted) return;
+      _positionSub = _locationSource.positionStream().listen(
         (position) {
           // فحص احترازي: نتأكد إن الـ Stream ينبض ولا يتوقف بسبب توفير الطاقة بالنظام
           debugPrint(
@@ -94,8 +145,9 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
             'heading=${position.heading}°, speed=${position.speed} م/ث',
           );
           if (!mounted) return;
+          final isMoving = _busMotion.moveTo(LatLng(position.latitude, position.longitude));
           setState(() => _driverPosition = position);
-          _followDriver(position);
+          _followDriver(position, isMoving: isMoving);
         },
         onError: (e) => debugPrint('❌ [LiveTripScreen] خطأ ببث الموقع: $e'),
       );
@@ -107,11 +159,15 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
 
   /// يحرّك الكاميرا بسلاسة (Pan) لتتبع السائق تلقائياً مع كل تحديث GPS،
   /// بدل ما تتجمد الخريطة على أول تمركز.
-  void _followDriver(Position position) {
+  /// لما الحافلة تمشي بسلاسة، الكاميرا تمشي بنفس المدة وبسرعة ثابتة
+  /// حتى تقعد الحافلة في نص الشاشة بدل ما تسبقها الكاميرا
+  void _followDriver(Position position, {bool isMoving = false}) {
     if (!_mapReady) return;
     _animatedMapController.animateTo(
       dest: LatLng(position.latitude, position.longitude),
       zoom: _animatedMapController.mapController.camera.zoom,
+      duration: isMoving ? _busMotion.currentDuration : null,
+      curve: isMoving ? Curves.linear : null,
     );
   }
 
@@ -130,9 +186,7 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
     Position? pos = _driverPosition;
     if (pos == null) {
       try {
-        pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-        );
+        pos = await _locationSource.getCurrentPosition();
       } catch (_) {}
     }
     if (pos == null) {
@@ -187,9 +241,7 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
       Position? pos = _driverPosition;
       if (pos == null) {
         try {
-          pos = await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-          );
+          pos = await _locationSource.getCurrentPosition();
         } catch (_) {}
       }
       if (pos == null) {
@@ -254,119 +306,73 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
   }
 
   Future<void> _handleReportBreakdown() async {
-    final controller = TextEditingController();
-    String? errorText;
+    if (_isReportingBreakdown) return;
 
-    final confirmed = await showDialog<bool>(
+    final reason = await showDialog<String>(
       context: context,
-      builder: (dCtx) => StatefulBuilder(
-        builder: (context, setStateDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              const Icon(Icons.warning_amber_rounded, color: AppColors.error),
-              const SizedBox(width: 8),
-              const Text('إبلاغ طوارئ تعطل المركبة', textAlign: TextAlign.right),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'يرجى كتابة سبب العطل بشكل دقيق للإدارة والسائقين البدلاء قبل إرسال بلاغ الطوارئ:',
-                style: AppTextStyles.style(fontSize: 13),
+      builder: (_) => const _BreakdownReasonDialog(),
+    );
+    if (!mounted || reason == null) return;
+
+    // مؤشر إرسال يغطي الشاشة ويمنع إرسال بلاغ ثاني لين يوصل الرد
+    setState(() => _isReportingBreakdown = true);
+    try {
+      final position = await _breakdownPosition();
+      if (!mounted) return;
+
+      // بدون موقع نبعتوا البلاغ بلا إحداثيات (الباك يستعمل آخر موقع عنده)
+      // بدل (0, 0)، وبدون عنوان لأن عنوان بيت الطفل مش مكان العطل
+      final request = VehicleBreakdownRequestModel(
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+        reason: reason,
+        accuracy: position?.accuracy,
+        speed: position?.speed,
+      );
+      await context.read<LiveTripCubit>().reportBreakdown(widget.tripId, request);
+    } finally {
+      if (mounted) setState(() => _isReportingBreakdown = false);
+    }
+  }
+
+  /// موقع لحظة البلاغ: GPS جديد (بحد أقصى 10 ثواني)، وإلا آخر موقع معروف
+  /// للحافلة، وإلا null
+  Future<Position?> _breakdownPosition() async {
+    try {
+      await _locationSource.ensurePermission();
+      return await _locationSource.getCurrentPosition().timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return _driverPosition;
+    }
+  }
+
+  Widget _buildBreakdownSendingOverlay() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.45),
+        child: Center(
+          child: Material(
+            color: context.cardSurface,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: AppColors.error),
+                  const SizedBox(height: 14),
+                  Text(
+                    'جاري إرسال بلاغ الطوارئ...',
+                    style: AppTextStyles.style(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                textAlign: TextAlign.right,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  hintText: 'مثال: عطل في المحرك وتوقف تام للمركبة في طريق الشط',
-                  errorText: errorText,
-                  border: const OutlineInputBorder(),
-                ),
-                onChanged: (_) {
-                  if (errorText != null) {
-                    setStateDialog(() => errorText = null);
-                  }
-                },
-              ),
-            ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dCtx).pop(false),
-              child: const Text('إلغاء'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final text = controller.text.trim();
-                if (text.isEmpty) {
-                  setStateDialog(() => errorText = 'يرجى إدخال سبب العطل لتفعيل بلاغ الطوارئ');
-                  return;
-                }
-                Navigator.of(dCtx).pop(true);
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-              child: const Text('إرسال بلاغ الطوارئ'),
-            ),
-          ],
         ),
       ),
     );
-
-    if (!mounted || confirmed != true) return;
-
-    final reason = controller.text.trim();
-
-    // Get exact current GPS location at moment of breakdown report
-    Position position;
-    try {
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
-    } catch (_) {
-      position = Position(
-        latitude: _driverPosition?.latitude ?? 0.0,
-        longitude: _driverPosition?.longitude ?? 0.0,
-        timestamp: DateTime.now(),
-        accuracy: 0.0,
-        altitude: 0.0,
-        altitudeAccuracy: 0.0,
-        heading: 0.0,
-        headingAccuracy: 0.0,
-        speed: 0.0,
-        speedAccuracy: 0.0,
-      );
-    }
-
-    if (!mounted) return;
-    String? currentAddress;
-    final currentState = context.read<LiveTripCubit>().state;
-    if (currentState is LiveTripLoaded) {
-      currentAddress = currentState.currentChild?.pickupAddress ??
-          currentState.stops.firstOrNull?.label;
-    }
-
-    final request = VehicleBreakdownRequestModel(
-      latitude: position.latitude,
-      longitude: position.longitude,
-      reason: reason,
-      accuracy: position.accuracy,
-      speed: position.speed,
-      address: currentAddress,
-    );
-
-    if (!mounted) return;
-    await context.read<LiveTripCubit>().reportBreakdown(widget.tripId, request);
   }
-
 
   void _showBreakdownResultDialog(VehicleBreakdownResponseModel result) {
     showDialog(
@@ -424,9 +430,19 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    return Directionality(
+    // زر الرجوع وهي مكبّرة يصغّر الخريطة بدل الخروج من الرحلة
+    return PopScope(
+      canPop: !_isMapExpanded && !_isReportingBreakdown,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isMapExpanded) {
+          setState(() => _isMapExpanded = false);
+        }
+      },
+      child: Directionality(
       textDirection: TextDirection.rtl,
-      child: Scaffold(
+      child: Stack(
+        children: [
+      Scaffold(
         backgroundColor: context.backgroundSurface,
         appBar: AppBar(
           // اسم المسار (route_name) من /driver/trips/{id} — يظهر بمجرد توفره بالحالة
@@ -439,14 +455,46 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
             },
           ),
           actions: [
+            // مفتاح المحاكاة — نسخة التطوير فقط، لا يظهر نهائياً في نسخة الإصدار
+            if (kDebugMode)
+              ValueListenableBuilder<bool>(
+                valueListenable: _locationSource.mockEnabled,
+                builder: (context, isMock, _) => IconButton(
+                  tooltip: isMock ? 'إيقاف المحاكاة (رجوع للـ GPS)' : 'تشغيل محاكاة الرحلة',
+                  icon: Icon(
+                    isMock ? Icons.science_rounded : Icons.science_outlined,
+                    color: isMock ? AppColors.orange : null,
+                  ),
+                  onPressed: _toggleMockMode,
+                ),
+              ),
             BlocBuilder<LiveTripCubit, LiveTripState>(
               builder: (context, state) {
                 if (state is! LiveTripLoaded) return const SizedBox.shrink();
                 if (state.isInProgress) {
-                  return IconButton(
-                    tooltip: 'الإبلاغ عن عطل',
-                    icon: const Icon(Icons.report_problem_outlined),
-                    onPressed: _handleReportBreakdown,
+                  return Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 8),
+                    child: TextButton.icon(
+                      onPressed: _isReportingBreakdown ? null : _handleReportBreakdown,
+                      style: TextButton.styleFrom(
+                        backgroundColor: AppColors.error,
+                        foregroundColor: AppColors.white,
+                        disabledBackgroundColor: AppColors.error.withValues(alpha: 0.5),
+                        disabledForegroundColor: AppColors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        visualDensity: VisualDensity.compact,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      ),
+                      icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                      label: Text(
+                        'طوارئ',
+                        style: AppTextStyles.style(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.white,
+                        ),
+                      ),
+                    ),
                   );
                 }
                 return const SizedBox.shrink();
@@ -460,7 +508,9 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
               (current.blockingErrorMessage != null ||
                   current.actionErrorMessage != null ||
                   current.isCompleted ||
-                  current.breakdownResult != null),
+                  // نتيجة البلاغ تظهر مرة وحدة بس: لحظة وصولها
+                  (current.breakdownResult != null &&
+                      (previous is! LiveTripLoaded || previous.breakdownResult == null))),
           listener: (context, state) {
             if (state is! LiveTripLoaded) return;
             if (state.blockingErrorMessage != null) {
@@ -474,7 +524,10 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
               _showSnack(state.actionErrorMessage!, isError: true);
               context.read<LiveTripCubit>().clearActionError();
             } else if (state.breakdownResult != null) {
-              _showBreakdownResultDialog(state.breakdownResult!);
+              final result = state.breakdownResult!;
+              // نمسحوها طول حتى ما تسبقش ديالوج إنهاء الرحلة ولا تتعاود
+              context.read<LiveTripCubit>().clearBreakdownResult();
+              _showBreakdownResultDialog(result);
             } else if (state.isCompleted && state.completedSummary != null) {
               _showCompletionDialog(state);
             }
@@ -510,12 +563,45 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
             }
 
             final loaded = state as LiveTripLoaded;
-            return Column(
+            // نفس الـ SizedBox يتغير ارتفاعه فقط، فالخريطة ما تنبنيش من جديد
+            // ويكمل تتبع الـ GPS والكاميرا والمسار بدون انقطاع
+            return LayoutBuilder(
+              builder: (context, constraints) => Column(
               children: [
                 SizedBox(
-                  height: 220,
-                  child: _isLocating ? _buildMapLoadingPlaceholder() : _buildMap(loaded.stops),
+                  height: _isMapExpanded ? constraints.maxHeight : 220,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: _isLocating ? _buildMapLoadingPlaceholder() : _buildMap(loaded.stops),
+                      ),
+                      Positioned(
+                        top: 12,
+                        left: 12,
+                        child: FloatingActionButton.small(
+                          heroTag: 'driver_live_map_expand',
+                          tooltip: _isMapExpanded ? 'تصغير الخريطة' : 'تكبير الخريطة',
+                          backgroundColor: context.isDarkMode ? AppColors.grey400 : AppColors.white,
+                          elevation: 4,
+                          onPressed: () => setState(() => _isMapExpanded = !_isMapExpanded),
+                          child: Icon(
+                            _isMapExpanded ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                            color: context.primaryColor,
+                          ),
+                        ),
+                      ),
+                      if (_isMapExpanded)
+                        Positioned(
+                          left: 12,
+                          right: 12,
+                          bottom: 12,
+                          child: _buildExpandedMapBottomCard(loaded, constraints.maxHeight),
+                        ),
+                    ],
+                  ),
                 ),
+                if (!_isMapExpanded) ...[
+                if (_locationSource.isMock) MockRouteDebugPanel(provider: _locationSource.mockRoute),
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: TripProgressBar(
@@ -523,7 +609,14 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
                     total: loaded.progress.total,
                   ),
                 ),
-                if (loaded.isSuspended) _buildSuspendedBanner(),
+                if (loaded.isSuspended) _buildSuspendedBanner(loaded),
+                if (loaded.proximityAlert != null && loaded.proximityAlertReceivedAt != null)
+                  ProximityAlertBanner(
+                    key: ValueKey(loaded.proximityAlert!.key),
+                    alert: loaded.proximityAlert!,
+                    receivedAt: loaded.proximityAlertReceivedAt!,
+                    onDismiss: context.read<LiveTripCubit>().dismissProximityAlert,
+                  ),
                 if (loaded.isInProgress) _buildNextStationSection(loaded),
                 Expanded(
                   child: ListView.builder(
@@ -532,83 +625,29 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
                     itemBuilder: (context, index) {
                       final item = loaded.childItems[index];
                       final isCurrent = loaded.currentChild?.tripChildId == item.tripChildId;
-                      return TripChildActionCard(
-                        item: item,
-                        isCurrent: isCurrent,
-                        isPendingAction: loaded.pendingActionTripChildId == item.tripChildId,
-                        distanceMeters: _distanceToChild(item),
-                        hasTargetCoordinates: item.targetLatitude != null && item.targetLongitude != null,
-                        isTripCompleted: loaded.isCompleted || loaded.tripStatus == 'completed',
-                        onManualConfirm: loaded.isSuspended ? () {} : () => _handleManualConfirm(item),
-                        onAbsent: loaded.isSuspended
-                            ? () {}
-                            : () => _confirmAndRunWithLocation(
-                                  'تأكيد الغياب',
-                                  'هل تؤكد أن ${item.name} غير موجود في هذه المحطة؟',
-                                  (lat, lng) => context.read<LiveTripCubit>().markAbsent(
-                                        widget.tripId,
-                                        item,
-                                        latitude: lat,
-                                        longitude: lng,
-                                      ),
-                                ),
-                        onSkip: loaded.isSuspended
-                            ? () {}
-                            : () => context.read<LiveTripCubit>().skipChild(widget.tripId, item),
-                        onDropoffFailed: loaded.isSuspended
-                            ? () {}
-                            : () => _confirmAndRunWithLocation(
-                                  'تعذر التسليم',
-                                  'سيتم تسجيل هذه المحطة كحالة تعذر تسليم. هل أنت متأكد؟',
-                                  (lat, lng) => context.read<LiveTripCubit>().markDropoffFailed(
-                                        widget.tripId,
-                                        item,
-                                        latitude: lat,
-                                        longitude: lng,
-                                      ),
-                                ),
-                        onDirectParentHandling: loaded.isSuspended
-                            ? () {}
-                            : () => _confirmAndRunWithLocation(
-                                  'تسليم مباشر لولي الأمر',
-                                  'سيتم تسجيل استلام ولي الأمر للطفل مباشرة. هل أنت متأكد؟',
-                                  (lat, lng) => context.read<LiveTripCubit>().markDirectParentHandling(
-                                        widget.tripId,
-                                        item,
-                                        latitude: lat,
-                                        longitude: lng,
-                                      ),
-                                ),
-                      );
+                      return _buildChildActionCard(loaded, item, isCurrent);
                     },
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: loaded.isSuspended
-                      ? PrimaryButton(
-                          label: 'استئناف الرحلة',
-                          icon: Icons.play_circle_outline_rounded,
-                          width: double.infinity,
-                          onPressed: () => context.read<LiveTripCubit>().resumeTrip(widget.tripId),
-                        )
-                      : PrimaryButton(
-                          label: 'إنهاء الرحلة',
-                          icon: Icons.flag_circle_rounded,
-                          backgroundColor: loaded.canComplete ? AppColors.success : AppColors.grey400,
-                          width: double.infinity,
-                          onPressed: _handleComplete,
-                        ),
+                  child: _buildTripEndButton(loaded),
                 ),
+                ],
               ],
+            ),
             );
           },
         ),
       ),
+          if (_isReportingBreakdown) _buildBreakdownSendingOverlay(),
+        ],
+      ),
+      ),
     );
   }
 
-  Widget _buildSuspendedBanner() {
+  Widget _buildSuspendedBanner(LiveTripLoaded loaded) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -624,13 +663,138 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'الرحلة متوقفة مؤقتاً (عطل) — استأنفها للاستمرار في الإجراءات.',
+              loaded.substituteAccepted
+                  ? 'استلم السائق البديل مهمة نقل الأطفال — لا يمكن استئناف هذه الرحلة.'
+                  : 'الرحلة متوقفة مؤقتاً (عطل) — استأنفها للاستمرار في الإجراءات.',
               style: AppTextStyles.style(fontSize: 12, color: AppColors.error, fontWeight: FontWeight.w600),
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// بطاقة إجراءات طفل واحد (استلام/غياب/تخطي...) — تُستخدم بالقائمة وبالكرت العايم فوق الخريطة المكبّرة
+  Widget _buildChildActionCard(LiveTripLoaded loaded, LiveTripChildItem item, bool isCurrent) {
+    return TripChildActionCard(
+      item: item,
+      isCurrent: isCurrent,
+      isPendingAction: loaded.pendingActionTripChildId == item.tripChildId,
+      distanceMeters: _distanceToChild(item),
+      hasTargetCoordinates: item.targetLatitude != null && item.targetLongitude != null,
+      isTripCompleted: loaded.isCompleted || loaded.tripStatus == 'completed',
+      onManualConfirm: loaded.isSuspended ? () {} : () => _handleManualConfirm(item),
+      onAbsent: loaded.isSuspended
+          ? () {}
+          : () => _confirmAndRunWithLocation(
+                'تأكيد الغياب',
+                'هل تؤكد أن ${item.name} غير موجود في هذه المحطة؟',
+                (lat, lng) => context.read<LiveTripCubit>().markAbsent(
+                      widget.tripId,
+                      item,
+                      latitude: lat,
+                      longitude: lng,
+                    ),
+              ),
+      onSkip: loaded.isSuspended
+          ? () {}
+          : () => context.read<LiveTripCubit>().skipChild(widget.tripId, item),
+      onDropoffFailed: loaded.isSuspended
+          ? () {}
+          : () => _confirmAndRunWithLocation(
+                'تعذر التسليم',
+                'سيتم تسجيل هذه المحطة كحالة تعذر تسليم. هل أنت متأكد؟',
+                (lat, lng) => context.read<LiveTripCubit>().markDropoffFailed(
+                      widget.tripId,
+                      item,
+                      latitude: lat,
+                      longitude: lng,
+                    ),
+              ),
+      onDirectParentHandling: loaded.isSuspended
+          ? () {}
+          : () => _confirmAndRunWithLocation(
+                'تسليم مباشر لولي الأمر',
+                'سيتم تسجيل استلام ولي الأمر للطفل مباشرة. هل أنت متأكد؟',
+                (lat, lng) => context.read<LiveTripCubit>().markDirectParentHandling(
+                      widget.tripId,
+                      item,
+                      latitude: lat,
+                      longitude: lng,
+                    ),
+              ),
+    );
+  }
+
+  /// الكرت العايم أسفل الخريطة المكبّرة: المحطة الجاية وبطاقة الطفل الحالي
+  /// بأزرارها — حتى يكمل السائق الرحلة بدون تصغير الخريطة
+  Widget _buildExpandedMapBottomCard(LiveTripLoaded loaded, double availableHeight) {
+    final isDark = context.isDarkMode;
+    LiveTripChildItem? currentItem;
+    for (final item in loaded.childItems) {
+      if (item.tripChildId == loaded.currentChild?.tripChildId) {
+        currentItem = item;
+        break;
+      }
+    }
+
+    return Container(
+      // سقف للارتفاع حتى تبقى الخريطة ظاهرة، والمحتوى الزايد يتسكرول
+      constraints: BoxConstraints(maxHeight: availableHeight * 0.55),
+      decoration: BoxDecoration(
+        color: (isDark ? context.cardSurface : AppColors.white).withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.1),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (loaded.isSuspended) _buildSuspendedBanner(loaded),
+            if (loaded.isInProgress) _buildNextStationSection(loaded),
+            if (currentItem != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: _buildChildActionCard(loaded, currentItem, true),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// زر إنهاء الرحلة أو استئنافها حسب حالة التوقف
+  Widget _buildTripEndButton(LiveTripLoaded loaded) {
+    // بعد قبول البديل الاستئناف مرفوض من الباك — نعطوه طريق للخروج بدل زر ما يخدمش
+    if (loaded.isSuspended && loaded.substituteAccepted) {
+      return PrimaryButton(
+        label: 'رجوع للرئيسية',
+        icon: Icons.home_rounded,
+        width: double.infinity,
+        onPressed: () => Navigator.of(context).pop(),
+      );
+    }
+    return loaded.isSuspended
+      ? PrimaryButton(
+          label: 'استئناف الرحلة',
+          icon: Icons.play_circle_outline_rounded,
+          width: double.infinity,
+          onPressed: () => context.read<LiveTripCubit>().resumeTrip(widget.tripId),
+        )
+      : PrimaryButton(
+          label: 'إنهاء الرحلة',
+          icon: Icons.flag_circle_rounded,
+          backgroundColor: loaded.canComplete ? AppColors.success : AppColors.grey400,
+          width: double.infinity,
+          onPressed: _handleComplete,
+        );
   }
 
   /// يعرض "المحطة التالية" بالاعتماد حصراً على next_stop/next_child القادمين
@@ -752,41 +916,24 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
         ? LatLng(_driverPosition!.latitude, _driverPosition!.longitude)
         : (stops.isNotEmpty ? LatLng(stops.first.latitude, stops.first.longitude) : const LatLng(0, 0));
 
-    // Fetch road route asynchronously if stops or driver position changed
-    final waypoints = <LatLng>[
-      if (_driverPosition != null) driverLatLng,
-      ...stops
-          .where((s) => s.latitude != 0.0 && s.longitude != 0.0)
-          .map((s) => LatLng(s.latitude, s.longitude)),
-    ];
-
-    if (waypoints.length >= 2) {
-      final routeKey = waypoints
-          .map((w) => '${w.latitude.toStringAsFixed(4)},${w.longitude.toStringAsFixed(4)}')
-          .join(';');
-      if (routeKey != _cachedRouteKey) {
-        _cachedRouteKey = routeKey;
-        OsrmRoutingService.fetchRoute(waypoints).then((result) {
-          if (mounted && result.points.isNotEmpty) {
-            setState(() => _roadPolylinePoints = result.points);
-          }
-        });
-      }
-    }
-
     final currentState = context.read<LiveTripCubit>().state;
     LiveTripLoaded? loadedState;
     if (currentState is LiveTripLoaded) {
       loadedState = currentState;
     }
 
-    final markers = <Marker>[
-      if (_driverPosition != null)
-        Marker(
-          point: driverLatLng,
-          width: 48,
-          height: 48,
-          child: Transform.rotate(
+    final routeTargets = stops
+        .where((s) => s.latitude != 0.0 && s.longitude != 0.0)
+        .map((s) => LatLng(s.latitude, s.longitude))
+        .toList();
+    final roadPolylinePoints = _driverPosition != null && routeTargets.isNotEmpty
+        ? _routeTracker.update(driverLatLng, routeTargets)
+        : const <LatLng>[];
+
+    // أيقونة الحافلة تنرسم في طبقة منفصلة فوق المحطات وتتحرك بسلاسة (_busMotion)
+    final Widget? busIcon = _driverPosition == null
+        ? null
+        : Transform.rotate(
             angle: _driverPosition!.heading * math.pi / 180,
             child: Container(
               decoration: BoxDecoration(
@@ -807,8 +954,9 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
                 size: 24,
               ),
             ),
-          ),
-        ),
+          );
+
+    final markers = <Marker>[
       ...List.generate(stops.length, (i) {
         final stop = stops[i];
         final badgeNum = stop.sequenceOrder > 0 ? stop.sequenceOrder : (i + 1);
@@ -877,9 +1025,6 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
       }),
     ];
 
-    final effectivePolylinePoints = _roadPolylinePoints.isNotEmpty
-        ? _roadPolylinePoints
-        : stops.map((s) => LatLng(s.latitude, s.longitude)).toList();
 
     return FlutterMap(
       mapController: _animatedMapController.mapController,
@@ -893,16 +1038,31 @@ class _LiveTripScreenState extends State<LiveTripScreen> with TickerProviderStat
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.kids_transport.app',
         ),
-        PolylineLayer(
-          polylines: [
-            Polyline(
-              points: effectivePolylinePoints,
-              strokeWidth: 4.5,
-              color: AppColors.primaryLight,
-            ),
-          ],
-        ),
+        if (roadPolylinePoints.length >= 2)
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: roadPolylinePoints,
+                strokeWidth: 4.5,
+                color: AppColors.primaryLight,
+              ),
+            ],
+          ),
         MarkerLayer(markers: markers),
+        if (busIcon != null)
+          AnimatedBuilder(
+            animation: _busMotion.controller,
+            builder: (context, _) => MarkerLayer(
+              markers: [
+                Marker(
+                  point: _busMotion.position ?? driverLatLng,
+                  width: 48,
+                  height: 48,
+                  child: busIcon,
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -964,6 +1124,84 @@ class _SummaryRow extends StatelessWidget {
           Text(value, style: AppTextStyles.style(fontSize: 13, fontWeight: FontWeight.bold)),
         ],
       ),
+    );
+  }
+}
+
+/// ديالوج سبب العطل — يملك الـ TextEditingController ويتخلص منه مع إغلاقه،
+/// ويرجّع السبب المكتوب أو null عند الإلغاء
+class _BreakdownReasonDialog extends StatefulWidget {
+  const _BreakdownReasonDialog();
+
+  @override
+  State<_BreakdownReasonDialog> createState() => _BreakdownReasonDialogState();
+}
+
+class _BreakdownReasonDialogState extends State<_BreakdownReasonDialog> {
+  final TextEditingController _controller = TextEditingController();
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      setState(() => _errorText = 'يرجى إدخال سبب العطل لتفعيل بلاغ الطوارئ');
+      return;
+    }
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.error),
+          SizedBox(width: 8),
+          Text('إبلاغ طوارئ تعطل المركبة', textAlign: TextAlign.right),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'يرجى كتابة سبب العطل بشكل دقيق للإدارة والسائقين البدلاء قبل إرسال بلاغ الطوارئ:',
+            style: AppTextStyles.style(fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            textAlign: TextAlign.right,
+            maxLines: 3,
+            decoration: InputDecoration(
+              hintText: 'مثال: عطل في المحرك وتوقف تام للمركبة في طريق الشط',
+              errorText: _errorText,
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: (_) {
+              if (_errorText != null) setState(() => _errorText = null);
+            },
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        ElevatedButton(
+          onPressed: _submit,
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+          child: const Text('إرسال بلاغ الطوارئ'),
+        ),
+      ],
     );
   }
 }

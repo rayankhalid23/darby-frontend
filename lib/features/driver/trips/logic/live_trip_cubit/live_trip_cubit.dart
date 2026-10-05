@@ -1,16 +1,18 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:kids_transport/core/network/api_exception.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_details_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_live_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_stop_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/live_trip_child_item.dart';
+import 'package:kids_transport/features/driver/trips/data/models/proximity_alert_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/trip_action_result_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/vehicle_breakdown_model.dart';
 import 'package:kids_transport/features/driver/trips/data/repositories/driver_trips_repository.dart';
+import 'package:kids_transport/features/driver/trips/data/services/driver_location_source.dart';
 
 part 'live_trip_state.dart';
 
@@ -21,10 +23,35 @@ part 'live_trip_state.dart';
 /// هذا الكوبيت يدمج الاثنين في [LiveTripChildItem] واحد لكل طفل.
 class LiveTripCubit extends Cubit<LiveTripState> {
   final DriverTripsRepository _repository;
+  final DriverLocationSource _locationSource = DriverLocationSource.instance;
   Timer? _locationTimer;
   Timer? _refreshTimer;
+  int? _syncTripId;
+  bool _pingInFlight = false;
 
-  LiveTripCubit(this._repository) : super(LiveTripInitial());
+  /// مفتاح آخر تنبيه استُلم — الـ Backend قد يكرر نفس التنبيه مع كل نبضة،
+  /// فلا نعيد تشغيل العداد ولا نُظهر تنبيهاً أغلقه السائق
+  String? _lastProximityKey;
+
+  LiveTripCubit(this._repository) : super(LiveTripInitial()) {
+    _locationSource.mockEnabled.addListener(_onLocationModeChanged);
+  }
+
+  /// نبضة GPS كل 12 ثانية بالوضع الحقيقي، وكل ثانيتين بالمحاكاة
+  Duration get _locationInterval =>
+      _locationSource.isMock ? _locationSource.mockRoute.tickInterval : const Duration(seconds: 12);
+
+  void _onLocationModeChanged() {
+    final tripId = _syncTripId;
+    if (tripId == null || isClosed) return;
+    _startLocationTimer(tripId);
+  }
+
+  void _startLocationTimer(int tripId) {
+    _locationTimer?.cancel();
+    _sendLocationPing(tripId);
+    _locationTimer = Timer.periodic(_locationInterval, (_) => _sendLocationPing(tripId));
+  }
 
   Future<void> loadAll(int tripId) async {
     emit(LiveTripLoading());
@@ -75,21 +102,39 @@ class LiveTripCubit extends Cubit<LiveTripState> {
 
     final homeStopByChildId = <int, DriverTripStopModel>{};
     final schoolStopBySchoolId = <int, DriverTripStopModel>{};
+    // محطة مدرسة خاصة بطفل (محطات الإنقاذ تجي بـ child_id) — تتقدّم على
+    // الربط بـ school_id لو نفس المدرسة متكررة بالمسار المدموج
+    final schoolStopByChildId = <int, DriverTripStopModel>{};
+    // رحلة الإنقاذ/المسار المدموج: "نقطة استلام الأطفال من الحافلة المتوقفة"
+    // محطة home بلا child_id، وبعدها محطات الأطفال العالقين. كل طفل عالق
+    // يتربط بنقطة الاستلام اللي قبله مباشرة (لو صار أكثر من عطل باليوم)
+    final rescuePickupByChildId = <int, DriverTripStopModel>{};
+    DriverTripStopModel? lastPickupPoint;
     for (final stop in sortedStops) {
+      if (stop.isHome && stop.childId == null) {
+        lastPickupPoint = stop;
+        continue;
+      }
+      if (stop.childId != null && lastPickupPoint != null) {
+        rescuePickupByChildId.putIfAbsent(stop.childId!, () => lastPickupPoint!);
+      }
       if (stop.isHome && stop.childId != null) {
         homeStopByChildId[stop.childId!] = stop;
-      } else if (stop.isSchool && stop.schoolId != null) {
-        schoolStopBySchoolId[stop.schoolId!] = stop;
+      } else if (stop.isSchool) {
+        if (stop.childId != null) schoolStopByChildId[stop.childId!] = stop;
+        if (stop.schoolId != null) schoolStopBySchoolId[stop.schoolId!] = stop;
       }
     }
 
     final items = details.children.map((child) {
       DriverTripStopModel? targetStop;
       if (child.status == 'pending') {
-        targetStop = homeStopByChildId[child.childId];
+        // الطفل العالق يُستلم من مكان الحافلة المعطلة، مش من بيته
+        targetStop = rescuePickupByChildId[child.childId] ?? homeStopByChildId[child.childId];
       } else if (child.status == 'boarded') {
         final schoolId = schoolNameToId[child.school];
-        targetStop = schoolId != null ? schoolStopBySchoolId[schoolId] : null;
+        targetStop = schoolStopByChildId[child.childId] ??
+            (schoolId != null ? schoolStopBySchoolId[schoolId] : null);
       }
 
       double? targetLat = targetStop?.latitude;
@@ -186,13 +231,9 @@ class LiveTripCubit extends Cubit<LiveTripState> {
   }
 
   void startBackgroundSync(int tripId) {
-    _locationTimer?.cancel();
+    _syncTripId = tripId;
     _refreshTimer?.cancel();
-    _sendLocationPing(tripId);
-    _locationTimer = Timer.periodic(
-      const Duration(seconds: 12),
-      (_) => _sendLocationPing(tripId),
-    );
+    _startLocationTimer(tripId);
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 15),
       (_) {
@@ -209,13 +250,20 @@ class LiveTripCubit extends Cubit<LiveTripState> {
 
   Future<void> _sendLocationPing(int tripId) async {
     final current = state;
-    if (current is! LiveTripLoaded || !current.isInProgress) return;
+    if (current is! LiveTripLoaded) return;
+    if (!current.isInProgress) {
+      // بدون هذا السطر ما يبانش ليش ولي الأمر ما يشوفش موقع السائق
+      debugPrint('⏸️ [LiveTrip] لم يُرسل الموقع: حالة الرحلة "${current.tripStatus}" وليست in_progress');
+      return;
+    }
+    // بالمحاكاة النبضة كل ثانيتين — نمنع تراكم الطلبات لو الشبكة بطيئة
+    final isMock = _locationSource.isMock;
+    if (isMock && _pingInFlight) return;
+    _pingInFlight = true;
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      final position = await _locationSource.getCurrentPosition();
       final recordedAt = position.timestamp.toUtc().toIso8601String();
-      await Future.wait([
+      final results = await Future.wait<Object?>([
         _repository.updateLocation(
           tripId,
           latitude: position.latitude,
@@ -235,8 +283,30 @@ class LiveTripCubit extends Cubit<LiveTripState> {
           status: current.tripStatus,
         ),
       ]);
-    } catch (_) {
-      // فشل صامت لتحديث الموقع الدوري، لا نكسر واجهة السائق أثناء القيادة
+      _handleProximityAlerts(results[0] as List<ProximityAlertModel>);
+    } catch (e) {
+      // لا نكسر واجهة السائق أثناء القيادة، لكن نطبع السبب
+      debugPrint('❌ [LiveTrip] فشل إرسال الموقع للرحلة $tripId: $e');
+    } finally {
+      _pingInFlight = false;
+    }
+  }
+
+  void _handleProximityAlerts(List<ProximityAlertModel> alerts) {
+    if (alerts.isEmpty || isClosed) return;
+    // الوصول أهم من الاقتراب لو جا الاثنين بنفس الاستجابة
+    final alert = alerts.firstWhere((a) => a.isArrival, orElse: () => alerts.first);
+    if (alert.key == _lastProximityKey) return;
+    _lastProximityKey = alert.key;
+    final latest = state;
+    if (latest is! LiveTripLoaded) return;
+    emit(latest.copyWith(proximityAlert: alert, proximityAlertReceivedAt: DateTime.now()));
+  }
+
+  void dismissProximityAlert() {
+    final current = state;
+    if (current is LiveTripLoaded) {
+      emit(current.copyWith(clearProximityAlert: true));
     }
   }
 
@@ -484,7 +554,19 @@ class LiveTripCubit extends Cubit<LiveTripState> {
       emit(current.copyWith(tripStatus: result.status));
     } catch (e) {
       final message = e is ApiException ? e.message : 'فشل استئناف الرحلة: ${e.toString()}';
-      emit(current.copyWith(actionErrorMessage: message));
+      final substituteAccepted = e is ApiException && e.errorCode == 'SUBSTITUTE_ALREADY_ACCEPTED';
+      emit(current.copyWith(
+        actionErrorMessage: message,
+        substituteAccepted: substituteAccepted ? true : null,
+      ));
+    }
+  }
+
+  /// تُستدعى بعد عرض ديالوج نتيجة البلاغ حتى ما يتعاودش مع أي تحديث لاحق للحالة
+  void clearBreakdownResult() {
+    final current = state;
+    if (current is LiveTripLoaded && current.breakdownResult != null) {
+      emit(current.copyWith(clearBreakdownResult: true));
     }
   }
 
@@ -504,6 +586,7 @@ class LiveTripCubit extends Cubit<LiveTripState> {
 
   @override
   Future<void> close() {
+    _locationSource.mockEnabled.removeListener(_onLocationModeChanged);
     _locationTimer?.cancel();
     _refreshTimer?.cancel();
     return super.close();

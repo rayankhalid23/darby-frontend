@@ -140,7 +140,7 @@ class _LocationChangeHistoryScreenState
                         child: ListView.separated(
                           padding: EdgeInsets.all(16.w),
                           itemCount: requests.length,
-                          separatorBuilder: (_, __) => SizedBox(height: 12.h),
+                          separatorBuilder: (_, _) => SizedBox(height: 12.h),
                           itemBuilder: (context, index) {
                             final item = requests[index];
                             return _buildRequestItemCard(
@@ -177,7 +177,7 @@ class _LocationChangeHistoryScreenState
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.symmetric(horizontal: 16.w),
         itemCount: filters.length,
-        separatorBuilder: (_, __) => SizedBox(width: 8.w),
+        separatorBuilder: (_, _) => SizedBox(width: 8.w),
         itemBuilder: (context, idx) {
           final filter = filters[idx];
           final isSelected = _selectedStatusFilter == filter['key'];
@@ -372,7 +372,7 @@ class _LocationChangeHistoryScreenState
                   SizedBox(width: 8.w),
                   Expanded(
                     child: Text(
-                      'تم تثبيت التغيير وموافقة السائق.. في حال رغبتك بالتراجع يرجى التواصل مع السائق أو الدعم الفني.',
+                      'تم تثبيت التغيير وموافقة السائق.. في حال رغبتك بالتراجع يرجى التواصل مع السائق.',
                       style: AppTextStyles.style(
                         fontSize: 11.sp,
                         color: Colors.green.shade800,

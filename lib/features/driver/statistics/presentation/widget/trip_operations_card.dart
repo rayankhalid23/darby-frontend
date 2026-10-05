@@ -108,9 +108,9 @@ class TripOperationsCard extends StatelessWidget {
           Divider(color: isDark ? AppColors.grey800 : AppColors.grey200, height: 1),
           SizedBox(height: 14.h),
 
-          // الأعطال والغياب
+          // الأعطال
           Text(
-            'الغياب والأعطال:',
+            'الأعطال والتوقف:',
             style: AppTextStyles.style(
               fontSize: 12.sp,
               fontWeight: FontWeight.w600,
@@ -122,18 +122,12 @@ class TripOperationsCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _downtimeItem(
-                  'أيام الغياب',
-                  '${downtime.absenceDaysCount} يوم',
-                  isDark,
-                ),
-              ),
-              Expanded(
-                child: _downtimeItem(
                   'أعطال المركبة',
                   '${downtime.vehicleBreakdownsCount} مرة',
                   isDark,
                 ),
               ),
+              SizedBox(width: 8.w),
               Expanded(
                 child: _downtimeItem(
                   'إجمالي التوقف',

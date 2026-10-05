@@ -55,6 +55,9 @@ import 'package:kids_transport/features/driver/trips/logic/driver_trips_history_
 import 'package:kids_transport/features/driver/trips/logic/driver_absence_cubit/driver_absence_cubit.dart';
 import 'package:kids_transport/features/driver/statistics/presentation/screen/driver_statistics_screen.dart';
 import 'package:kids_transport/features/driver/statistics/logic/cubit/driver_statistics_cubit.dart';
+import 'package:kids_transport/features/driver/requests/presentation/screens/driver_requests_screen.dart';
+import 'package:kids_transport/features/driver/requests/presentation/screens/driver_request_details_screen.dart';
+import 'package:kids_transport/features/driver/requests/logic/driver_requests_cubit.dart';
 import 'package:kids_transport/features/driver/requests/presentation/screens/driver_location_change_requests_screen.dart';
 import 'package:kids_transport/features/driver/requests/logic/driver_location_change_cubit.dart';
 import 'package:kids_transport/features/driver/trips/presentation/screens/driver_emergency_dispatches_screen.dart';
@@ -212,6 +215,8 @@ class AppRoutes {
       '/driver-emergency-dispatches';
   static const String driverEmergencyDispatchDetails =
       '/driver-emergency-dispatch-details';
+  static const String driverRequests = '/driver-requests';
+  static const String driverRequestDetails = '/driver-request-details';
 
   static String getInitialRoute() {
     return splash;
@@ -613,6 +618,30 @@ class AppRoutes {
           BlocProvider(
             create: (_) => driverSl<DriverEmergencyCubit>(),
             child: EmergencyDispatchDetailsScreen(dispatchId: dispatchId),
+          ),
+        );
+      case driverRequests:
+        return _route(
+          settings,
+          MultiBlocProvider(
+            providers: [
+              BlocProvider(
+                create: (_) => driverSl<DriverRequestsCubit>()..loadRequests(),
+              ),
+              BlocProvider(
+                create: (_) => driverSl<DriverSubscriptionsCubit>(),
+              ),
+            ],
+            child: const DriverRequestsScreen(),
+          ),
+        );
+      case driverRequestDetails:
+        final requestId = settings.arguments as int;
+        return _route(
+          settings,
+          BlocProvider(
+            create: (_) => driverSl<DriverRequestsCubit>(),
+            child: DriverRequestDetailsScreen(requestId: requestId),
           ),
         );
 

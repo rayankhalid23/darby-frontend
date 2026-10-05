@@ -79,6 +79,7 @@ flutter:
     - assets/images/
     - assets/fonts/
     - assets/service_account.json
+    - assets/mock_routes/
 
   # الخطوط (Fonts) منسقة بمسافتين تحت flutter
   fonts:

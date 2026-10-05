@@ -160,6 +160,7 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
                       isMultiMode: false,
                       singleTrack: state is TripTrackingSingleLoaded ? state.trackData : null,
                       singleTrip: widget.trip,
+                      locationErrorMessage: TrackingMapWidget.locationErrorFrom(state),
                     );
                   },
                 ),

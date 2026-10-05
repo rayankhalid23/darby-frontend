@@ -68,7 +68,7 @@ class UpcomingTripChild {
       childId: _parseInt(json['child_id']),
       childName: json['child_name']?.toString() ?? '',
       schoolName: json['school_name']?.toString() ?? school?.name ?? '',
-      childPhoto: json['child_photo']?.toString() ?? json['photo']?.toString(),
+      childPhoto: json['child_photo']?.toString() ?? json['photo']?.toString() ?? json['photo_url']?.toString() ?? json['image']?.toString(),
       costPerChild: json['cost_per_child']?.toString(),
       homeLocation: home,
       schoolLocation: school,

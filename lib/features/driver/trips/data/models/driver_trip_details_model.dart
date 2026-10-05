@@ -253,7 +253,7 @@ class TripDetailsChildModel extends Equatable {
       tripChildId: DriverTripDetailsModel._parseInt(json['trip_child_id']),
       childId: DriverTripDetailsModel._parseInt(json['child_id']),
       name: json['name']?.toString() ?? '',
-      photo: json['photo']?.toString(),
+      photo: json['photo']?.toString() ?? json['photo_url']?.toString() ?? json['image']?.toString(),
       school: json['school']?.toString() ?? json['school_name']?.toString() ?? '',
       schoolName: json['school_name']?.toString() ?? json['school']?.toString(),
       pickupAddress: json['pickup_address']?.toString() ?? json['home_location']?['address']?.toString() ?? '',

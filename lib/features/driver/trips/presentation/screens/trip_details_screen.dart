@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:kids_transport/core/widgets/app_user_avatar.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:kids_transport/core/network/api_exception.dart';
@@ -298,7 +299,8 @@ class _ChildTile extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(13),
                   child: CachedNetworkImage(
-                    imageUrl: child.photo!,
+                    imageUrl: AppUserAvatar.resolveUrl(child.photo)!,
+                    httpHeaders: AppUserAvatar.imageHeaders,
                     width: 26,
                     height: 26,
                     fit: BoxFit.cover,

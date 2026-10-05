@@ -43,6 +43,14 @@ class LiveTripLoaded extends LiveTripState {
   final NextStopModel? nextStop;
   final NextChildModel? nextChild;
 
+  /// آخر تنبيه اقتراب/وصول من استجابة /location ووقت استلامه (لعداد الانتظار)
+  final ProximityAlertModel? proximityAlert;
+  final DateTime? proximityAlertReceivedAt;
+
+  /// الباك رفض الاستئناف لأن سائق بديل قبل مهمة الإنقاذ
+  /// (SUBSTITUTE_ALREADY_ACCEPTED) — الرحلة تقعد معلّقة والاستئناف مقفول
+  final bool substituteAccepted;
+
   const LiveTripLoaded({
     required this.tripStatus,
     required this.stops,
@@ -58,6 +66,9 @@ class LiveTripLoaded extends LiveTripState {
     this.routeName = '',
     this.nextStop,
     this.nextChild,
+    this.proximityAlert,
+    this.proximityAlertReceivedAt,
+    this.substituteAccepted = false,
   });
 
   bool get isInProgress => tripStatus == 'in_progress';
@@ -87,6 +98,10 @@ class LiveTripLoaded extends LiveTripState {
     bool clearNextStop = false,
     NextChildModel? nextChild,
     bool clearNextChild = false,
+    ProximityAlertModel? proximityAlert,
+    DateTime? proximityAlertReceivedAt,
+    bool clearProximityAlert = false,
+    bool? substituteAccepted,
   }) {
     return LiveTripLoaded(
       tripStatus: tripStatus ?? this.tripStatus,
@@ -106,6 +121,11 @@ class LiveTripLoaded extends LiveTripState {
       routeName: routeName ?? this.routeName,
       nextStop: clearNextStop ? null : (nextStop ?? this.nextStop),
       nextChild: clearNextChild ? null : (nextChild ?? this.nextChild),
+      proximityAlert: clearProximityAlert ? null : (proximityAlert ?? this.proximityAlert),
+      proximityAlertReceivedAt: clearProximityAlert
+          ? null
+          : (proximityAlertReceivedAt ?? this.proximityAlertReceivedAt),
+      substituteAccepted: substituteAccepted ?? this.substituteAccepted,
     );
   }
 
@@ -125,5 +145,8 @@ class LiveTripLoaded extends LiveTripState {
         routeName,
         nextStop,
         nextChild,
+        proximityAlert,
+        proximityAlertReceivedAt,
+        substituteAccepted,
       ];
 }

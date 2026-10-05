@@ -31,21 +31,15 @@ class TripsRemoteDataSource {
     int tripId,
     LiveTrackingModel baseModel,
   ) {
+    // نسمع لمستند الرحلة هذي بس (السائق يكتب في trips_tracking/{tripId}) —
+    // ما نبحثوش في المجموعة كاملة حتى ما يطلعش سائق رحلة ثانية لولي الأمر
     return _firestore
         .collection('trips_tracking')
+        .doc(tripId.toString())
         .snapshots()
         .map((snapshot) {
-      if (snapshot.docs.isEmpty) {
-        return baseModel;
-      }
-
-      final data = _findBestDocWithLocation(
-        snapshot.docs,
-        tripId,
-        baseModel.driverId,
-      );
-
-      if (data == null) {
+      final data = snapshot.data();
+      if (!snapshot.exists || data == null) {
         return baseModel;
       }
 
@@ -81,70 +75,6 @@ class TripsRemoteDataSource {
         isOnline: true,
       );
     });
-  }
-
-  /// 🌟 5-Tier Resolver to find document with valid live coordinates in Firestore
-  static Map<String, dynamic>? _findBestDocWithLocation(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-    int tripId,
-    int? driverId,
-  ) {
-    final String docIdStr = tripId.toString();
-
-    // 1. Try exact doc ID match WITH valid location
-    for (final doc in docs) {
-      if (doc.id == docIdStr) {
-        final loc = _extractLocationFromMap(doc.data());
-        if (loc['lat'] != 0.0 && loc['lng'] != 0.0) {
-          return doc.data();
-        }
-      }
-    }
-
-    // 2. Try trip_id field match WITH valid location
-    for (final doc in docs) {
-      final docData = doc.data();
-      final parsedId = (docData['trip_id'] as num?)?.toInt() ??
-          int.tryParse(docData['trip_id']?.toString() ?? '');
-      if (parsedId == tripId) {
-        final loc = _extractLocationFromMap(docData);
-        if (loc['lat'] != 0.0 && loc['lng'] != 0.0) {
-          return docData;
-        }
-      }
-    }
-
-    // 3. Try driver_id field match WITH valid location
-    if (driverId != null && driverId != 0) {
-      for (final doc in docs) {
-        final docData = doc.data();
-        final parsedDriverId = (docData['driver_id'] as num?)?.toInt() ??
-            int.tryParse(docData['driver_id']?.toString() ?? '');
-        if (parsedDriverId == driverId) {
-          final loc = _extractLocationFromMap(docData);
-          if (loc['lat'] != 0.0 && loc['lng'] != 0.0) {
-            return docData;
-          }
-        }
-      }
-    }
-
-    // 4. Fallback: find ANY active doc in collection that HAS valid non-zero location
-    for (final doc in docs) {
-      final loc = _extractLocationFromMap(doc.data());
-      if (loc['lat'] != 0.0 && loc['lng'] != 0.0) {
-        return doc.data();
-      }
-    }
-
-    // 5. Last resort: return doc matching exact ID even if lat is 0
-    for (final doc in docs) {
-      if (doc.id == docIdStr) {
-        return doc.data();
-      }
-    }
-
-    return docs.isNotEmpty ? docs.first.data() : null;
   }
 
   /// 🌟 Robust location extractor that handles GeoPoint, nested maps, and all key variants
@@ -207,8 +137,17 @@ class TripsRemoteDataSource {
   }
 
   /// 🌟 Stream Multiple Active Trips Live Tracking from Firebase Firestore
-  Stream<List<LiveTrackingModel>> trackMultipleTripsLiveStream() {
-    return _firestore.collection('trips_tracking').snapshots().map((snapshot) {
+  /// يسمع فقط لمستندات رحلات ولي الأمر النشطة (من parent/trips/active)،
+  /// بدل المجموعة كاملة اللي فيها رحلات قديمة ورحلات أولياء أمور آخرين.
+  Stream<List<LiveTrackingModel>> trackMultipleTripsLiveStream(List<int> tripIds) {
+    final ids = tripIds.where((id) => id > 0).toSet().map((id) => id.toString()).toList();
+    if (ids.isEmpty) return Stream.value(const <LiveTrackingModel>[]);
+    // whereIn يقبل 30 قيمة كحد أقصى — أكثر من كافي لرحلات ولي أمر واحد
+    return _firestore
+        .collection('trips_tracking')
+        .where(FieldPath.documentId, whereIn: ids.take(30).toList())
+        .snapshots()
+        .map((snapshot) {
       final List<LiveTrackingModel> list = [];
       for (final doc in snapshot.docs) {
         final data = doc.data();

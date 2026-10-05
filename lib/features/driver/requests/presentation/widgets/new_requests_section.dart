@@ -5,7 +5,6 @@ import 'package:kids_transport/core/theme/text_styles.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
 import 'package:kids_transport/core/widgets/app_section_header.dart';
 import 'package:kids_transport/features/driver/requests/data/models/driver_request_model.dart';
-import 'package:kids_transport/features/driver/requests/presentation/screens/driver_request_details_screen.dart';
 
 /// قسم طلبات الاشتراك الجديدة في الصفحة الرئيسية للسائق
 /// يعرض أول طلب جديد مع زر "عرض الكل"
@@ -129,10 +128,9 @@ class _HomeRequestCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => DriverRequestDetailsScreen(requestId: request.id),
-          ),
+        Navigator.of(context).pushNamed(
+          '/driver-request-details',
+          arguments: request.id,
         );
       },
       child: Container(

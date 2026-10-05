@@ -120,7 +120,7 @@ class TripHistoryChild {
       schoolName: json['school_name']?.toString() ?? school?.name ?? '',
       tripCost: cost,
       costPerChild: cost,
-      childPhoto: json['child_photo']?.toString() ?? json['photo']?.toString(),
+      childPhoto: json['child_photo']?.toString() ?? json['photo']?.toString() ?? json['photo_url']?.toString() ?? json['image']?.toString(),
       status: json['status']?.toString(),
       pickupTime: json['pickup_time']?.toString(),
       dropoffTime: json['dropoff_time']?.toString(),

@@ -205,6 +205,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen> {
                             singleTrip: _currentDisplayedTrip,
                             multiTracks: state is TripTrackingMultiLoaded ? state.tracks : [],
                             multiTrips: _effectiveTrips,
+                            locationErrorMessage: TrackingMapWidget.locationErrorFrom(state),
                           );
                         },
                       ),

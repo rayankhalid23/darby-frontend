@@ -2,29 +2,31 @@ import 'package:equatable/equatable.dart';
 
 /// كائن طلب طوارئ تعطل المركبة (POST /driver/trips/{tripId}/report-breakdown)
 class VehicleBreakdownRequestModel extends Equatable {
-  final double latitude;
-  final double longitude;
+  /// null لو تعذّر تحديد الموقع — الباك يستعمل آخر موقع معروف عنده
+  /// بدل ما نبعتوا (0, 0) كموقع حقيقي
+  final double? latitude;
+  final double? longitude;
   final String reason;
-  final double accuracy;
-  final double speed;
+  final double? accuracy;
+  final double? speed;
   final String? address;
 
   const VehicleBreakdownRequestModel({
     required this.latitude,
     required this.longitude,
     required this.reason,
-    required this.accuracy,
-    required this.speed,
+    this.accuracy,
+    this.speed,
     this.address,
   });
 
   Map<String, dynamic> toJson() {
     return {
-      'latitude': latitude,
-      'longitude': longitude,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
       'reason': reason,
-      'accuracy': accuracy,
-      'speed': speed,
+      if (accuracy != null) 'accuracy': accuracy,
+      if (speed != null) 'speed': speed,
       if (address != null && address!.isNotEmpty) 'address': address,
     };
   }

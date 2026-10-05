@@ -65,7 +65,7 @@ class VehicleRepository {
       );
       final resMap = (response.data is Map) ? response.data as Map : {};
       final message = resMap['message']?.toString() ?? 'تم تحديث بيانات المركبة بنجاح';
-      final data = resMap['data'] != null ? resMap['data'] : {};
+      final data = resMap['data'] ?? {};
       final vehicle = VehicleModel.fromJson(Map<String, dynamic>.from(data as Map));
       return (message: message, vehicle: vehicle);
     } on DioException catch (e) {

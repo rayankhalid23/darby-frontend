@@ -30,8 +30,6 @@ class DriverPreferencesCubit extends Cubit<DriverPreferencesState> {
   }
 
   Future<void> loadDriverPreferences() async {
-    if (_defaults == null) return;
-
     emit(DriverPreferencesLoading());
     try {
       final fetchedPreferences = await _repository.getPreferences();
@@ -39,7 +37,7 @@ class DriverPreferencesCubit extends Cubit<DriverPreferencesState> {
       emit(
         DriverPreferencesLoaded(
           preferences: fetchedPreferences,
-          defaults: _defaults!,
+          defaults: _defaults,
         ),
       );
     } on ApiException catch (e) {

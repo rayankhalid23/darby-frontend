@@ -42,40 +42,69 @@ class _DriverRequestsScreenState extends State<DriverRequestsScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
+    final bool isStandalone =
+        ModalRoute.of(context)?.settings.name == AppRoutes.driverRequests;
 
     return Scaffold(
       backgroundColor: context.backgroundSurface,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(50),
-        child: Container(
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.surfaceDark : AppColors.white,
-            border: Border(
-              bottom: BorderSide(
-                color: isDark
-                    ? AppColors.grey800
-                    : AppColors.grey.withValues(alpha: 0.1),
-                width: 1,
+      appBar: isStandalone
+          ? AppBar(
+              title: Text(
+                'الطلبات والاشتراكات',
+                style: AppTextStyles.style(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              centerTitle: true,
+              backgroundColor: isDark ? AppColors.surfaceDark : AppColors.white,
+              bottom: TabBar(
+                controller: _tabController,
+                indicatorColor: context.primaryColor,
+                labelColor: context.primaryColor,
+                unselectedLabelColor: AppColors.textMuted,
+                indicatorWeight: 3,
+                labelStyle: AppTextStyles.style(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+                tabs: const [
+                  Tab(text: 'طلبات الاشتراك'),
+                  Tab(text: 'الاشتراكات النشطة'),
+                ],
+              ),
+            )
+          : PreferredSize(
+              preferredSize: const Size.fromHeight(50),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.surfaceDark : AppColors.white,
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isDark
+                          ? AppColors.grey800
+                          : AppColors.grey.withValues(alpha: 0.1),
+                      width: 1,
+                    ),
+                  ),
+                ),
+                child: TabBar(
+                  controller: _tabController,
+                  indicatorColor: context.primaryColor,
+                  labelColor: context.primaryColor,
+                  unselectedLabelColor: AppColors.textMuted,
+                  indicatorWeight: 3,
+                  labelStyle: AppTextStyles.style(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  tabs: const [
+                    Tab(text: 'طلبات الاشتراك'),
+                    Tab(text: 'الاشتراكات النشطة'),
+                  ],
+                ),
               ),
             ),
-          ),
-          child: TabBar(
-            controller: _tabController,
-            indicatorColor: context.primaryColor,
-            labelColor: context.primaryColor,
-            unselectedLabelColor: AppColors.textMuted,
-            indicatorWeight: 3,
-            labelStyle: AppTextStyles.style(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-            ),
-            tabs: const [
-              Tab(text: 'طلبات الاشتراك'),
-              Tab(text: 'الاشتراكات النشطة'),
-            ],
-          ),
-        ),
-      ),
       body: TabBarView(
         controller: _tabController,
         children: const [_RequestsTabContent(), _SubscriptionsTabContent()],

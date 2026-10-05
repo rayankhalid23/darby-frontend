@@ -504,15 +504,19 @@ class _TripsHomeScreenState extends State<TripsHomeScreen> {
                 children: [
                   AppUserAvatar(imageUrl: c.childPhoto, radius: 9.r),
                   SizedBox(width: 6.w),
-                  Text(
-                    c.childName,
-                    style: AppTextStyles.style(
-                      fontSize: 11.sp,
-                      fontWeight: FontWeight.w600,
-                      color: context.textPrimary,
+                  Flexible(
+                    child: Text(
+                      c.childName,
+                      style: AppTextStyles.style(
+                        fontSize: 11.sp,
+                        fontWeight: FontWeight.w600,
+                        color: context.textPrimary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ),
-                  const Spacer(),
+                  SizedBox(width: 6.w),
                   TripStatusChip.fromStatusString(c.childStatus),
                 ],
               ),

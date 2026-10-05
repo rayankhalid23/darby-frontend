@@ -38,7 +38,7 @@ class ComplaintStatusBadge extends StatelessWidget {
       case 'rejected':
         bgColor = AppColors.error.withValues(alpha: 0.12);
         textColor = AppColors.error;
-        label = 'مغلقة / تم رفض الشكوى';
+        label = 'مغلقة';
         icon = Icons.cancel_outlined;
         break;
       case 'closed':

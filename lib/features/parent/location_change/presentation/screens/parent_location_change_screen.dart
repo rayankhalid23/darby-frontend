@@ -8,6 +8,7 @@ import '../../../../../core/utils/theme_context.dart';
 import '../../logic/cubit/location_change_cubit.dart';
 import '../widgets/address_selection_bottom_sheet.dart';
 import 'location_change_history_screen.dart';
+import 'package:kids_transport/features/parent/addresses/presentation/widgets/add_address_sheet.dart';
 
 class ParentLocationChangeScreen extends StatefulWidget {
   const ParentLocationChangeScreen({super.key});
@@ -72,12 +73,14 @@ class _ParentLocationChangeScreenState
                     ),
                   );
                 } else if (state.error != null && state.error!.isNotEmpty) {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(state.error!),
                       backgroundColor: context.errorColor,
                     ),
                   );
+                  _cubit.clearError();
                 }
               }
             },
@@ -210,11 +213,11 @@ class _ParentLocationChangeScreenState
             )
           else
             SizedBox(
-              height: 88.h,
+              height: 110.h,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: children.length,
-                separatorBuilder: (_, __) => SizedBox(width: 14.w),
+                separatorBuilder: (_, _) => SizedBox(width: 14.w),
                 itemBuilder: (context, index) {
                   final child = children[index];
                   final isSelected = selectedIds.contains(child.id);
@@ -350,11 +353,18 @@ class _ParentLocationChangeScreenState
               ),
               InkWell(
                 onTap: () async {
+                  final now = DateTime.now();
+                  final today = DateTime(now.year, now.month, now.day);
+                  DateTime initial = state.changeDate;
+                  if (initial.isBefore(today)) {
+                    initial = today;
+                  }
+
                   final picked = await showDatePicker(
                     context: context,
-                    initialDate: state.changeDate,
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 30)),
+                    initialDate: initial,
+                    firstDate: today,
+                    lastDate: today.add(const Duration(days: 30)),
                   );
                   if (picked != null) {
                     _cubit.setChangeDate(picked);
@@ -498,6 +508,23 @@ class _ParentLocationChangeScreenState
                     context,
                     addresses: state.options.addresses,
                     selectedAddress: state.selectedAddress,
+                    onAddNewAddress: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (ctx) => AddAddressSheet(
+                          onSave: (newAddr) async {
+                            _cubit.setCustomLocation(
+                              newAddr.latitude,
+                              newAddr.longitude,
+                              newAddr.title,
+                            );
+                            return null;
+                          },
+                        ),
+                      );
+                    },
                   );
                   if (address != null) {
                     _cubit.selectAddress(address);

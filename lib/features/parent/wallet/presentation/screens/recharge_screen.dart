@@ -287,7 +287,7 @@ class _PaymentMethodIcon extends StatelessWidget {
       child: Image.network(
         iconUrl!,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => fallback(),
+        errorBuilder: (_, _, _) => fallback(),
       ),
     );
   }

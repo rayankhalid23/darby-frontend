@@ -39,9 +39,16 @@ class LocationChangeRemoteDataSource {
       },
       headers: _authHeader,
     );
-    final data = response.data['data'];
-    final list = data is List ? data : (response.data is List ? response.data : []);
-    return list
+    final data = response.data['data'] ?? response.data;
+    List<dynamic> rawList = [];
+    if (data is List) {
+      rawList = data;
+    } else if (data is Map && data['children'] is List) {
+      rawList = data['children'] as List;
+    } else if (data is Map) {
+      rawList = data.values.toList();
+    }
+    return rawList
         .whereType<Map<String, dynamic>>()
         .map((e) => ChildAvailableTripsModel.fromJson(e))
         .toList();
@@ -88,7 +95,7 @@ class LocationChangeRemoteDataSource {
       headers: _authHeader,
     );
     final data = response.data['data'];
-    final list = data is List ? data : (response.data is List ? response.data : []);
+    final List<dynamic> list = data is List ? data : (response.data is List ? response.data as List : []);
     return list
         .whereType<Map<String, dynamic>>()
         .map((e) => LocationChangeRequestModel.fromJson(e))

@@ -37,7 +37,7 @@ class LocationChangeRepository {
       'point_type': pointType,
       'date': date,
       'selections': selections,
-      if (addressId != null) 'address_id': addressId,
+      'address_id': ?addressId,
       if (addressId == null && lat != null && lng != null) ...{
         'lat': lat,
         'lng': lng,
@@ -71,7 +71,7 @@ class LocationChangeRepository {
       'point_type': pointType,
       'date': date,
       'selections': selections,
-      if (addressId != null) 'address_id': addressId,
+      'address_id': ?addressId,
       if (addressId == null && lat != null && lng != null) ...{
         'lat': lat,
         'lng': lng,

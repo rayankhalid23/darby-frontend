@@ -5,6 +5,7 @@ import 'package:kids_transport/features/driver/trips/data/models/driver_trip_his
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_live_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/driver_trip_stop_model.dart';
+import 'package:kids_transport/features/driver/trips/data/models/proximity_alert_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/trip_action_result_model.dart';
 import 'package:kids_transport/features/driver/trips/data/models/vehicle_breakdown_model.dart';
 
@@ -25,7 +26,7 @@ class DriverTripsRepository {
 
   Future<DriverTripLiveModel> getTripLive(int tripId) => _remoteDataSource.fetchTripLive(tripId);
 
-  Future<void> updateLocation(
+  Future<List<ProximityAlertModel>> updateLocation(
     int tripId, {
     required double latitude,
     required double longitude,
