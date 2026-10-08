@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -8,6 +10,7 @@ import 'package:kids_transport/core/di/dependency_injection.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
 import 'package:kids_transport/core/widgets/app_user_avatar.dart';
 import '../../data/models/active_trip_model.dart';
+import '../../logic/trip_tracking_cubit/substitute_trip_switch.dart';
 import '../../logic/trip_tracking_cubit/trip_tracking_cubit.dart';
 import '../../logic/trip_tracking_cubit/trip_tracking_state.dart';
 import '../widgets/messenger_children_bar.dart';
@@ -42,12 +45,14 @@ class _TripTrackingScreenState extends State<TripTrackingScreen> {
   int? _selectedChildId;
   ActiveTripModel? _currentDisplayedTrip;
   List<ActiveTripModel> _effectiveTrips = [];
+  StreamSubscription<TripTrackingState>? _substituteSync;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _trackingCubit = getIt<TripTrackingCubit>();
+    _substituteSync = _trackingCubit.stream.listen(_syncSubstituteTrip);
 
     if (widget.initialSelectedChildId != null) {
       _isAllSelected = false;
@@ -72,8 +77,28 @@ class _TripTrackingScreenState extends State<TripTrackingScreen> {
 
   @override
   void dispose() {
+    _substituteSync?.cancel();
+    // الكيوبت factory خاص بالشاشة هذي — نقفلوه حتى ما يقعدش يسمع لـ Firestore
+    // ويطلب trips/active بعد ما الشاشة تتقفل
+    _trackingCubit.close();
     _mapController.dispose();
     super.dispose();
+  }
+
+  /// الكيوبت يتحول وحده لرحلة السائق البديل لما الحافلة تتعطل — نبدّلوا
+  /// الرحلة المعطلة بنفس مكانها في القائمة والرحلة المعروضة
+  void _syncSubstituteTrip(TripTrackingState state) {
+    if (!mounted) return;
+    final substitutes = substituteTripsIn(state);
+    if (substitutes.isEmpty) return;
+    final updatedTrips = replaceWithSubstitutes(_effectiveTrips, substitutes);
+    final shownSubstitute = substituteFor(_currentDisplayedTrip, substitutes);
+    if (updatedTrips == null && shownSubstitute == null) return;
+
+    setState(() {
+      if (updatedTrips != null) _effectiveTrips = updatedTrips;
+      if (shownSubstitute != null) _currentDisplayedTrip = shownSubstitute;
+    });
   }
 
   List<MessengerChildItem> _extractChildrenItems() {

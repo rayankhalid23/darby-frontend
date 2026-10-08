@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kids_transport/core/di/dependency_injection.dart';
 import 'package:kids_transport/features/auth/login/data/repositories/session_repository.dart';
+import 'package:kids_transport/features/parent/trips/data/repositories/trips_repository.dart';
 import 'package:kids_transport/main.dart' show navigatorKey;
 import 'app_router.dart';
 
@@ -58,6 +59,10 @@ class NotificationNavigationHandler {
 
     if (isParent) {
       switch (screen) {
+        // تعيين سائق بديل: entity_id هو رحلة البديل — نفتحوا تتبعها الحي
+        case 'TRIP_LIVE':
+          if (entityId != null) _openParentLiveTrip(state, entityId);
+          break;
         case 'TRIP_DETAILS':
         case 'TRIP_TRACKING':
           if (entityId != null) {
@@ -119,5 +124,26 @@ class NotificationNavigationHandler {
           break;
       }
     }
+  }
+
+  /// شاشة التتبع تحتاج الرحلة كاملة (ActiveTripModel)، فنجيبوها من trips/active.
+  /// لو الرحلة مش نشطة (خلصت مثلاً) نفتحوا تفاصيلها بدل التتبع
+  static Future<void> _openParentLiveTrip(NavigatorState state, int tripId) async {
+    try {
+      if (getIt.isRegistered<TripsRepository>()) {
+        final trips = await getIt<TripsRepository>().getActiveTrips();
+        final matches = trips.where((t) => t.tripId == tripId);
+        if (matches.isNotEmpty) {
+          state.pushNamed(
+            AppRoutes.parentTripTracking,
+            arguments: {'trip': matches.first, 'allTrips': trips},
+          );
+          return;
+        }
+      }
+    } catch (_) {
+      // نكمّلوا لتفاصيل الرحلة
+    }
+    state.pushNamed(AppRoutes.parentTripDetails, arguments: tripId);
   }
 }

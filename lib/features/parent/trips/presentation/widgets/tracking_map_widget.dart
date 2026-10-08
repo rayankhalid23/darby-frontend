@@ -63,6 +63,10 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> with TickerProvid
 
   static bool _hasLocation(double lat, double lng) => lat != 0.0 && lng != 0.0;
 
+  /// القائمة الأولى لو فيها عناصر، وإلا البديلة (قائمة فاضية مش null فـ ?? ما يكفيش)
+  static List<T> _nonEmptyOr<T>(List<T>? primary, List<T> fallback) =>
+      (primary != null && primary.isNotEmpty) ? primary : fallback;
+
   /// نقطة تمركز للرحلة لما موقع السائق مش متوفر: الوجهة ثم المدرسة ثم المنزل
   LatLng? _tripAnchor(ActiveTripModel? trip) {
     if (trip == null) return null;
@@ -274,10 +278,15 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> with TickerProvid
           : (_tripAnchor(widget.singleTrip) ?? defaultLocation);
 
       // Destination / Schools / Home markers with Name Tag above
-      final List<ChildSchoolModel> uniqueSchools = widget.singleTrip?.uniqueSchools ??
-          effectiveSingleTrack.uniqueSchools;
-      final List<ChildAddressModel> uniqueHomes = widget.singleTrip?.uniqueHomeAddresses ??
-          effectiveSingleTrack.uniqueHomeAddresses;
+      // رحلة البديل ترجّع مدارس الأطفال بدون إحداثيات بـ trips/active، فناخذوها من /track
+      final List<ChildSchoolModel> uniqueSchools = _nonEmptyOr(
+        widget.singleTrip?.uniqueSchools,
+        effectiveSingleTrack.uniqueSchools,
+      );
+      final List<ChildAddressModel> uniqueHomes = _nonEmptyOr(
+        widget.singleTrip?.uniqueHomeAddresses,
+        effectiveSingleTrack.uniqueHomeAddresses,
+      );
 
       // Render Unique Schools (Deduplicated)
       for (final school in uniqueSchools) {
@@ -451,8 +460,9 @@ class _TrackingMapWidgetState extends State<TrackingMapWidget> with TickerProvid
         }
 
         // Destination Markers (Deduplicated across tripMatch or track)
-        final List<ChildSchoolModel> uniqueSchools = tripMatch?.uniqueSchools ?? track.uniqueSchools;
-        final List<ChildAddressModel> uniqueHomes = tripMatch?.uniqueHomeAddresses ?? track.uniqueHomeAddresses;
+        final List<ChildSchoolModel> uniqueSchools = _nonEmptyOr(tripMatch?.uniqueSchools, track.uniqueSchools);
+        final List<ChildAddressModel> uniqueHomes =
+            _nonEmptyOr(tripMatch?.uniqueHomeAddresses, track.uniqueHomeAddresses);
 
         if (uniqueSchools.isNotEmpty) {
           for (final school in uniqueSchools) {

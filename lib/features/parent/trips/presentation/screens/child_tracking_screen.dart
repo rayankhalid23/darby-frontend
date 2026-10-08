@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -8,6 +10,7 @@ import 'package:kids_transport/core/di/dependency_injection.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
 import 'package:kids_transport/core/widgets/app_user_avatar.dart';
 import '../../data/models/active_trip_model.dart';
+import '../../logic/trip_tracking_cubit/substitute_trip_switch.dart';
 import '../../logic/trip_tracking_cubit/trip_tracking_cubit.dart';
 import '../../logic/trip_tracking_cubit/trip_tracking_state.dart';
 import '../widgets/tracking_map_widget.dart';
@@ -37,32 +40,47 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
   late final TripTrackingCubit _trackingCubit;
   late final MapController _mapController;
 
+  /// الرحلة المعروضة — تتبدل برحلة السائق البديل لو الحافلة تعطلت
+  late ActiveTripModel _trip;
+  StreamSubscription<TripTrackingState>? _substituteSync;
+
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _trackingCubit = getIt<TripTrackingCubit>();
+    _trip = widget.trip;
+    _substituteSync = _trackingCubit.stream.listen(_syncSubstituteTrip);
 
     _trackingCubit.startTracking(
-      widget.trip.tripId,
-      activeTrip: widget.trip,
+      _trip.tripId,
+      activeTrip: _trip,
       childId: widget.childId,
     );
   }
 
   @override
   void dispose() {
+    _substituteSync?.cancel();
+    _trackingCubit.close();
     _mapController.dispose();
     super.dispose();
+  }
+
+  void _syncSubstituteTrip(TripTrackingState state) {
+    if (!mounted) return;
+    final substitute = substituteFor(_trip, substituteTripsIn(state));
+    if (substitute == null) return;
+    setState(() => _trip = substitute);
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
 
-    final childInfo = widget.trip.children.firstWhere(
+    final childInfo = _trip.children.firstWhere(
       (c) => c.childId == widget.childId,
-      orElse: () => widget.trip.children.first,
+      orElse: () => _trip.children.first,
     );
 
     return Directionality(
@@ -121,7 +139,7 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
                             ),
                             SizedBox(height: 2.h),
                             Text(
-                              'في الطريق إلى ${widget.trip.destination.name}',
+                              'في الطريق إلى ${_trip.destination.name}',
                               style: AppTextStyles.style(
                                 fontSize: 11.sp,
                                 color: AppColors.success,
@@ -137,7 +155,7 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
                   SizedBox(height: 12.h),
                   Row(
                     children: [
-                      _buildMetricCard(context, Icons.flag_rounded, 'وقت الانطلاق', widget.trip.startedAt),
+                      _buildMetricCard(context, Icons.flag_rounded, 'وقت الانطلاق', _trip.startedAt),
                       SizedBox(width: 8.w),
                       _buildMetricCard(context, Icons.access_time_rounded, 'الوقت المتبقي', '20 دقيقة'),
                       SizedBox(width: 8.w),
@@ -159,7 +177,7 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
                       mapController: _mapController,
                       isMultiMode: false,
                       singleTrack: state is TripTrackingSingleLoaded ? state.trackData : null,
-                      singleTrip: widget.trip,
+                      singleTrip: _trip,
                       locationErrorMessage: TrackingMapWidget.locationErrorFrom(state),
                     );
                   },
@@ -185,7 +203,7 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
                 ),
                 child: ListView(
                   children: [
-                    DriverCard(driver: widget.trip.driver),
+                    DriverCard(driver: _trip.driver),
                     SizedBox(height: 12.h),
                     _buildChildStatusCard(context, childInfo, isDark),
                     SizedBox(height: 14.h),
@@ -197,7 +215,7 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => TripDetailsScreen(tripId: widget.trip.tripId),
+                              builder: (context) => TripDetailsScreen(tripId: _trip.tripId),
                             ),
                           );
                         },
@@ -280,8 +298,8 @@ class _ChildTrackingScreenState extends State<ChildTrackingScreen> {
 
   Widget _buildChildStatusCard(BuildContext context, TripChildInfo child, bool isDark) {
     final homeTitle = child.homeAddress?.title ??
-        (widget.trip.uniqueHomeAddresses.isNotEmpty ? widget.trip.uniqueHomeAddresses.first.title : 'عنوان منزل الطفل');
-    final schoolName = child.school?.name ?? widget.trip.destination.name;
+        (_trip.uniqueHomeAddresses.isNotEmpty ? _trip.uniqueHomeAddresses.first.title : 'عنوان منزل الطفل');
+    final schoolName = child.school?.name ?? _trip.destination.name;
 
     return Container(
       padding: EdgeInsets.all(12.r),

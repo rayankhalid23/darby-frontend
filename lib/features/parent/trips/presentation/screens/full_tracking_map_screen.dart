@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -7,6 +9,7 @@ import 'package:kids_transport/core/theme/text_styles.dart';
 import 'package:kids_transport/core/di/dependency_injection.dart';
 import 'package:kids_transport/core/utils/theme_context.dart';
 import '../../data/models/active_trip_model.dart';
+import '../../logic/trip_tracking_cubit/substitute_trip_switch.dart';
 import '../../logic/trip_tracking_cubit/trip_tracking_cubit.dart';
 import '../../logic/trip_tracking_cubit/trip_tracking_state.dart';
 import '../widgets/tracking_map_widget.dart';
@@ -30,19 +33,23 @@ class _FullTrackingMapScreenState extends State<FullTrackingMapScreen> {
   late final TripTrackingCubit _trackingCubit;
   late final MapController _mapController;
   late ActiveTripModel? _currentTrip;
+  late List<ActiveTripModel> _trips;
   bool _isMultiMode = true;
+  StreamSubscription<TripTrackingState>? _substituteSync;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _trackingCubit = getIt<TripTrackingCubit>();
+    _substituteSync = _trackingCubit.stream.listen(_syncSubstituteTrip);
 
     _currentTrip = widget.selectedTrip;
+    _trips = List.of(widget.allTrips);
     _isMultiMode = widget.selectedTrip == null;
 
     if (_isMultiMode) {
-      _trackingCubit.startMultiTracking(activeTrips: widget.allTrips);
+      _trackingCubit.startMultiTracking(activeTrips: _trips);
     } else {
       _trackingCubit.startTracking(widget.selectedTrip!.tripId, activeTrip: widget.selectedTrip);
     }
@@ -50,8 +57,27 @@ class _FullTrackingMapScreenState extends State<FullTrackingMapScreen> {
 
   @override
   void dispose() {
+    _substituteSync?.cancel();
+    // الكيوبت factory خاص بالشاشة هذي — نقفلوه حتى ما يقعدش يسمع لـ Firestore
+    // ويطلب trips/active بعد ما الشاشة تتقفل
+    _trackingCubit.close();
     _mapController.dispose();
     super.dispose();
+  }
+
+  /// الكيوبت يتحول وحده لرحلة السائق البديل لما الحافلة تتعطل
+  void _syncSubstituteTrip(TripTrackingState state) {
+    if (!mounted) return;
+    final substitutes = substituteTripsIn(state);
+    if (substitutes.isEmpty) return;
+    final updatedTrips = replaceWithSubstitutes(_trips, substitutes);
+    final shownSubstitute = substituteFor(_currentTrip, substitutes);
+    if (updatedTrips == null && shownSubstitute == null) return;
+
+    setState(() {
+      if (updatedTrips != null) _trips = updatedTrips;
+      if (shownSubstitute != null) _currentTrip = shownSubstitute;
+    });
   }
 
   @override
@@ -76,7 +102,7 @@ class _FullTrackingMapScreenState extends State<FullTrackingMapScreen> {
                       singleTrack: state is TripTrackingSingleLoaded ? state.trackData : null,
                       singleTrip: _currentTrip,
                       multiTracks: state is TripTrackingMultiLoaded ? state.tracks : [],
-                      multiTrips: widget.allTrips,
+                      multiTrips: _trips,
                       locationErrorMessage: TrackingMapWidget.locationErrorFrom(state),
                     );
                   },
@@ -144,7 +170,7 @@ class _FullTrackingMapScreenState extends State<FullTrackingMapScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'الرحلات النشطة (${widget.allTrips.length})',
+                      'الرحلات النشطة (${_trips.length})',
                       style: AppTextStyles.style(
                         fontSize: 13.sp,
                         fontWeight: FontWeight.bold,
@@ -152,7 +178,7 @@ class _FullTrackingMapScreenState extends State<FullTrackingMapScreen> {
                       ),
                     ),
                     SizedBox(height: 10.h),
-                    ...widget.allTrips.map((trip) {
+                    ..._trips.map((trip) {
                       final isSelected = !_isMultiMode && _currentTrip?.tripId == trip.tripId;
                       return InkWell(
                         onTap: () {

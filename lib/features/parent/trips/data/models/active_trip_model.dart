@@ -165,6 +165,16 @@ class TripChildInfo {
       schoolObj = ChildSchoolModel.fromJson(
         json['school'] as Map<String, dynamic>,
       );
+    } else if (json['school_name'] != null) {
+      // رحلة البديل ترجّع المدرسة كنص بدون إحداثيات — الاسم للعرض بس،
+      // وموقعها على الخريطة يجي من /track
+      schoolObj = ChildSchoolModel(
+        id: 0,
+        name: json['school_name'].toString(),
+        address: json['school_address']?.toString(),
+        lat: 0.0,
+        lng: 0.0,
+      );
     }
 
     return TripChildInfo(
@@ -221,6 +231,11 @@ class ActiveTripModel {
   final DestinationInfo destination;
   final String? waitingTimer;
 
+  /// رحلة سائق بديل استلم أطفال حافلة معطلة (original_trip_id)
+  final bool isSubstitute;
+  final int? originalTripId;
+  final int? dispatchId;
+
   const ActiveTripModel({
     required this.tripId,
     required this.tripType,
@@ -233,6 +248,9 @@ class ActiveTripModel {
     required this.children,
     required this.destination,
     this.waitingTimer,
+    this.isSubstitute = false,
+    this.originalTripId,
+    this.dispatchId,
   });
 
   // Legacy compatibility getters
@@ -248,7 +266,8 @@ class ActiveTripModel {
   List<ChildSchoolModel> get uniqueSchools {
     final Map<String, ChildSchoolModel> map = {};
     for (final c in children) {
-      if (c.school != null) {
+      // مدرسة بلا إحداثيات ما تنرسمش (وإلا تطلع علامتها في النقطة 0,0)
+      if (c.school != null && c.school!.lat != 0.0 && c.school!.lng != 0.0) {
         final key = '${c.school!.id}_${c.school!.lat}_${c.school!.lng}';
         map[key] = c.school!;
       }
@@ -260,7 +279,7 @@ class ActiveTripModel {
   List<ChildAddressModel> get uniqueHomeAddresses {
     final Map<String, ChildAddressModel> map = {};
     for (final c in children) {
-      if (c.homeAddress != null) {
+      if (c.homeAddress != null && c.homeAddress!.lat != 0.0 && c.homeAddress!.lng != 0.0) {
         final key =
             '${c.homeAddress!.title}_${c.homeAddress!.lat}_${c.homeAddress!.lng}';
         map[key] = c.homeAddress!;
@@ -335,6 +354,9 @@ class ActiveTripModel {
       children: childrenList,
       destination: destObj,
       waitingTimer: json['waiting_timer']?.toString(),
+      isSubstitute: json['is_substitute'] == true || json['is_substitute'] == 1,
+      originalTripId: int.tryParse(json['original_trip_id']?.toString() ?? ''),
+      dispatchId: int.tryParse(json['dispatch_id']?.toString() ?? ''),
     );
   }
 }
